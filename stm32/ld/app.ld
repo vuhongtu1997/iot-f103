@@ -1,0 +1,3 @@
+MEMORY { FLASH (rx) : ORIGIN = 0x08004000, LENGTH = 46K
+         RAM (rwx) : ORIGIN = 0x20000000, LENGTH = 20K }
+INCLUDE ld/sections.ld
