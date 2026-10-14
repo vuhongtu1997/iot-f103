@@ -1,0 +1,14 @@
+menu "Minihub Configuration"
+
+    config ENABLE_LITTLEFS
+        bool "Enable use Little FS"
+        default y
+        help
+            Enable use Little FS
+
+    config ENABLE_BLE
+        bool "Enable BLE feature"
+        default y
+        help
+            Can connect to BLE devices
+endmenu

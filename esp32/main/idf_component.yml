@@ -1,0 +1,6 @@
+## IDF Component Manager Manifest File
+dependencies:
+  joltwallet/littlefs: ==1.20.1
+  nopnop2002/sqlite3:
+    path: components/esp32-idf-sqlite3/
+    git: https://github.com/nopnop2002/esp32-idf-sqlite3.git

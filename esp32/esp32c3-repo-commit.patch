@@ -1,0 +1,342 @@
+From 5f7f65781af04c1c30ce3604b6eeed1454eb8d31 Mon Sep 17 00:00:00 2001
+From: tuvh <tuvuvu2121@gmail.com>
+Date: Fri, 9 Oct 2026 03:33:47 -0500
+Subject: [PATCH] Support ESP32-C3 gateway hardware and OTA model
+
+---
+ .gitignore                   |  5 +++++
+ README.md                    | 22 ++++++++++++++--------
+ common/protocol.h            |  2 +-
+ docs/PROTOCOL.md             |  2 +-
+ docs/VALIDATION.md           |  8 ++++++--
+ esp32/CMakeLists.txt         |  4 ++++
+ esp32/main/bus.c             | 20 ++++++++++----------
+ esp32/main/ota.c             |  2 +-
+ esp32/main/secrets.example.h |  8 +++++---
+ tests/stubs/driver/uart.h    |  2 +-
+ tests/stubs/secrets.h        |  6 +++---
+ tests/test_package.py        |  8 ++++++++
+ tools/package_firmware.py    | 11 +++++++----
+ 13 files changed, 66 insertions(+), 34 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index 5807af1..1e56427 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,6 +1,11 @@
+ common/ota_key.h
+ esp32/main/secrets.h
+ esp32/build/
++esp32/build-c3/
++esp32/sdkconfig
++esp32/sdkconfig.old
++esp32/sdkconfig.c3
++esp32/sdkconfig.c3.old
+ stm32/build/
+ tools/ota-key.bin
+ __pycache__/
+diff --git a/README.md b/README.md
+index 1bb77be..4e620ae 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # ESP32 + STM32F103C8T6: Wi-Fi/MQTT, cấp địa chỉ từ app qua broadcast và OTA
+ 
+-Bộ nguồn tham chiếu cho **ESP32-WROOM-32 có 4 MB flash**, **STM32F103C8T6 thật có 64 KB flash** và **W25Q32JV (3,3 V) trên mỗi nút**. ESP32 dùng ESP-IDF **v5.2.3**; STM32 dùng C bare metal, GNU Arm Embedded Toolchain và Make. Không phụ thuộc CubeMX/HAL hoặc Arduino. Xem `docs/VALIDATION.md` để biết chính xác những gì đã kiểm tra; không có xác nhận thử trên phần cứng.
++Bộ nguồn tham chiếu cho **ESP32-C3 có 4 MB flash**, **STM32F103C8T6 thật có 64 KB flash** và **W25Q32JV (3,3 V) trên mỗi nút**. ESP32 dùng ESP-IDF **v5.2.3**; STM32 dùng C bare metal, GNU Arm Embedded Toolchain và Make. Không phụ thuộc CubeMX/HAL hoặc Arduino. Xem `docs/VALIDATION.md` để biết chính xác những gì đã kiểm tra; không có xác nhận thử trên phần cứng.
+ 
+ ## Chức năng
+ 
+@@ -19,9 +19,9 @@ Hai đầu RS485 đều dùng transceiver **logic 3,3 V**, ví dụ MAX3485. Kh
+ 
+ | ESP32 | Transceiver |
+ |---|---|
+-| GPIO17 | DI |
+-| GPIO16 | RO |
+-| GPIO4 | DE + /RE |
++| GPIO4 | DI |
++| GPIO5 | RO |
++| GPIO6 | DE + /RE |
+ | 3V3 / GND | VCC / GND |
+ 
+ | STM32F103C8T6 | Thiết bị |
+@@ -34,6 +34,8 @@ Hai đầu RS485 đều dùng transceiver **logic 3,3 V**, ví dụ MAX3485. Kh
+ | PA0 | Đầu vào cảm biến analog 0–3,3 V |
+ | PA13 / PA14 | ST-LINK SWDIO / SWCLK |
+ 
++Gateway dùng **UART1**; UART0 không dùng cho RS485. GPIO4/5/6 cũng là chân JTAG ngoài, nên không dùng JTAG ngoài cùng lúc. GPIO12–17 thường dành cho flash trên module C3; không dùng cặp chân 16/17 của bản ESP32 trước. Chân USB Serial/JTAG 18/19 và strapping 2/8/9 được giữ riêng. Kiểm tra sơ đồ board nếu các chân mẫu đã gắn phần cứng khác.
++
+ Nối A–A, B–B và đường tham chiếu GND phù hợp. Bus đường trục, nhánh ngắn, điện trở 120 Ω chỉ ở hai đầu; chọn bias một vị trí. Dùng tụ decoupling gần từng IC. Với môi trường công nghiệp, bổ sung cách ly và bảo vệ phù hợp. Tên A/B giữa các hãng có thể khác, kiểm tra datasheet. Bản này dùng USART1 **38400, 8N1** ở cả hai đầu; đây là cấu hình được chọn đồng bộ, không phải mặc định 8E1 thường gặp của Modbus.
+ 
+ STM32 chạy **HSI 8 MHz**, không cần thạch anh ngoài. ADC quy đổi theo giả định VDDA=3300 mV; đo/calibrate VDDA nếu cần chính xác.
+@@ -73,11 +75,13 @@ ESP32: cài/export ESP-IDF v5.2.3:
+ 
+ ```sh
+ cd esp32
+-idf.py set-target esp32
++idf.py set-target esp32c3
+ idf.py build
+ idf.py -p /dev/ttyUSB0 flash monitor
+ ```
+ 
++Dự án chỉ hỗ trợ target **esp32c3**. Nếu có build cũ cho ESP32, chạy `idf.py set-target esp32c3` để tạo lại cấu hình/build. Nếu `secrets.h` đã có từ bản cũ, sửa TX=4, RX=5, DE=6; cập nhật tệp mẫu không tự thay cấu hình riêng. Bảng phân vùng mặc định cần flash ít nhất 4 MB; board có dung lượng khác cần kiểm tra lại trước khi nạp.
++
+ Windows: thay cổng bằng `COMx`. Bảng phân vùng đã có trong `partitions.csv`. Không đổi bảng phân vùng bằng OTA. Build lỗi thiếu secrets/ota_key: thực hiện bước chuẩn bị trước. Phiên bản ESP32 mặc định của CMake project có thể đặt khi build bằng `idf.py -DPROJECT_VER=2.0.0 build`.
+ 
+ ## Cấp địa chỉ từ app, cấp nguồn lần lượt
+@@ -155,9 +159,11 @@ Thay UID/URL bằng giá trị thật. Server trả HTTP 200 và Content-Length
+ Build ứng dụng ESP32 mới, upload `esp32/build/iot_gateway.bin`, rồi:
+ 
+ ```sh
+-python3 tools/package_firmware.py esp32/build/iot_gateway.bin --target esp32 --version 2 --url https://firmware.example.com/esp32/gateway-v2.bin --output gateway-ota.json
++python3 tools/package_firmware.py esp32/build/iot_gateway.bin --target esp32c3 --version 2 --url https://firmware.example.com/esp32/gateway-v2.bin --output gateway-ota.json
+ ```
+ 
++Target lệnh OTA khuyến nghị là `esp32c3`; `esp32` là alias cũ nhưng cũng dùng model HMAC C3 `0x32c3`. Manifest OTA ESP32 cũ (model `0x32`) phải được tạo lại; firmware phải build cho C3. Không thể OTA từ chip ESP32 sang C3 bằng một ảnh firmware chung.
++
+ `version` là metadata HMAC; version ESP32 báo lúc boot là `PROJECT_VER` trong binary. Sau OTA, ESP32 báo `rebooting`, sau đó `status` chứa phiên bản đang chạy và `ota/status` báo `confirmed` khi khởi tạo cục bộ và kết nối MQTT thành công. Chưa lưu job_id của OTA ESP32 để đối chiếu kết quả sau reboot. Nếu không kết nối MQTT trong 180 giây, rollback; vì vậy mất mạng dài sau OTA cũng có thể làm bản firmware mới bị rollback. Xác nhận MQTT không thay thế kiểm thử tất cả chức năng ứng dụng.
+ 
+ ## Gửi lệnh từ máy tính
+@@ -200,5 +206,5 @@ Windows PowerShell dùng `$env:MQTT_HOST='...'` và tương tự cho các biến
+ - STM32F103C8: https://www.st.com/en/microcontrollers-microprocessors/stm32f103c8.html
+ - RM0008: https://www.st.com/resource/en/reference_manual/cd00171190-stm32f101-103-105-107-stm32f100-series-armbased-32bit-mcus-stmicroelectronics.pdf
+ - Modbus serial: https://www.modbus.org/docs/Modbus_over_serial_line_V1_02.pdf
+-- ESP-IDF OTA: https://docs.espressif.com/projects/esp-idf/en/v5.2/esp32/api-reference/system/ota.html
+-- ESP-MQTT: https://docs.espressif.com/projects/esp-idf/en/v5.2/esp32/api-reference/protocols/mqtt.html
++- ESP-IDF OTA: https://docs.espressif.com/projects/esp-idf/en/v5.2/esp32c3/api-reference/system/ota.html
++- ESP-MQTT: https://docs.espressif.com/projects/esp-idf/en/v5.2/esp32c3/api-reference/protocols/mqtt.html
+diff --git a/common/protocol.h b/common/protocol.h
+index 7c7dcb9..7ddcaaf 100644
+--- a/common/protocol.h
++++ b/common/protocol.h
+@@ -7,7 +7,7 @@
+ #define ADDRESS_REGISTER 0x0100u
+ #define FC_OTA 0x42
+ #define MODEL_STM32 0x000103c8u
+-#define MODEL_ESP32 0x00000032u
++#define MODEL_ESP32 0x000032c3u /* ESP32-C3 only */
+ #define APP_BASE 0x08004000u
+ #define APP_LIMIT 0x0800f800u
+ #define APP_MAX (APP_LIMIT-APP_BASE)
+diff --git a/docs/PROTOCOL.md b/docs/PROTOCOL.md
+index 7b1c7e8..408147b 100644
+--- a/docs/PROTOCOL.md
++++ b/docs/PROTOCOL.md
+@@ -38,7 +38,7 @@ Response for all OTA operations: op[1], success[1], received_bytes[4]. No automa
+ | 3 | none | Verify HMAC/CRC/vectors, write READY marker, ACK then reset |
+ | 4 | none | Return RAM receive offset |
+ 
+-Descriptor: model[4], size[4], CRC32[4], version[4], all LE. STM32 model=0x103c8, ESP32 model=0x32. CRC32 is reflected IEEE polynomial 0xedb88320, initial/final XOR 0xffffffff. HMAC-SHA256(key, descriptor || exact image bytes); no padding in authenticated message. Authentication is shared-secret HMAC, not an asymmetric signature.
++Descriptor: model[4], size[4], CRC32[4], version[4], all LE. STM32 model=0x103c8, ESP32-C3 model=0x32c3. MQTT target `esp32c3` is preferred; `esp32` is a legacy alias that uses the same C3 model. CRC32 is reflected IEEE polynomial 0xedb88320, initial/final XOR 0xffffffff. HMAC-SHA256(key, descriptor || exact image bytes); no padding in authenticated message. Authentication is shared-secret HMAC, not an asymmetric signature.
+ 
+ W25: descriptor at 0, MAC at 16, READY 0xa55a5aa5 at 48, consumed at 52 (initial erased 0xffffffff; zero after successful install), image at 0x1000. READY is written last. Bootloader revalidates the entire staged image before erase, writes internal vector after all other bytes and CRC verification, then marks consumed. No address 0 response, no broadcast OTA, no bootloader OTA.
+ 
+diff --git a/docs/VALIDATION.md b/docs/VALIDATION.md
+index dd3d5b5..1a3391c 100644
+--- a/docs/VALIDATION.md
++++ b/docs/VALIDATION.md
+@@ -4,7 +4,7 @@
+ 
+ | Thành phần | Toolchain | Kết quả |
+ |---|---|---|
+-| ESP32 gateway | ESP-IDF v5.2.3, Xtensa GCC esp-13.2.0_20230928 | ELF/BIN sinh thành công; image 0x109b20 = 1.088.288 byte, vừa OTA slot 1.572.864 byte |
++| ESP32-C3 gateway | ESP-IDF v5.2.3, RISC-V GCC esp-13.2.0_20230928 | ELF/BIN sinh thành công; image 0x118280 = 1.147.520 byte, vừa OTA slot 1.572.864 byte |
+ | STM32 bootloader | GNU Arm Embedded GCC 13.2.1, Cortex-M3 Thumb, -Os | text 5.600 byte, bss 332 byte; vừa vùng 16 KB |
+ | STM32 application | Cùng toolchain | text 5.152 byte, bss 332 byte; vừa vùng 46 KB |
+ 
+@@ -24,7 +24,7 @@ Chạy `sh tests/run.sh` trên Linux có GCC và Python 3:
+ - Mất W25Q32 sau nạp dở: vector ứng dụng vẫn trắng.
+ - Chạy **bus.c thật** với UART mô phỏng: broadcast không có ACK, xác nhận unicast, từ chối ID đã dùng/offline, lỗi lưu trước broadcast không phát lệnh, giữ chỗ khi thiếu xác nhận và phục hồi bằng scan đọc-only.
+ - Chạy **node.c thật**: chỉ nút chưa cấu hình nhận FC06, nút đã cấu hình giữ ID, chế độ bootloader cũng hỗ trợ, từ chối ID/register sai, mọi broadcast đều im lặng.
+-- Script đóng gói: xác thực layout HMAC, từ chối bootloader có vector sai và URL HTTP.
++- Script đóng gói: xác thực layout HMAC, từ chối bootloader có vector sai và URL HTTP; target `esp32c3` và alias `esp32` cùng ký model C3 0x32c3.
+ - GCC host kiểm tra cú pháp toàn bộ nguồn STM32; GNU Arm build kiểm tra assembler/linker thực.
+ 
+ ## Chưa kiểm tra
+@@ -43,3 +43,7 @@ Mô hình host không mô phỏng flash đang bị brownout, hỏng bit ngẫu n
+ 6. OTA STM32: cập nhật phiên bản 1→2, firmware sai HMAC, ngắt mạng khi truyền, ngắt nguồn lúc copy.
+ 7. OTA ESP32: kiểm tra phiên bản báo lại và rollback khi firmware mới không đạt điều kiện xác nhận.
+ 8. Kiểm tra firmware mới chạy lỗi: STM32 chưa có rollback/boot-confirm, cần kế hoạch phục hồi qua ST-LINK.
++
++## Chuyển sang ESP32-C3
++
++Build xác nhận UART1, cấu hình chân GPIO4/5/6 và model HMAC C3. Cấu hình thử dùng flash 4 MB. Chưa có kiểm thử với board C3 thật.
+diff --git a/esp32/CMakeLists.txt b/esp32/CMakeLists.txt
+index f1c0f12..e3267c0 100644
+--- a/esp32/CMakeLists.txt
++++ b/esp32/CMakeLists.txt
+@@ -1,3 +1,7 @@
+ cmake_minimum_required(VERSION 3.16)
++set(IDF_TARGET "esp32c3" CACHE STRING "Gateway target")
+ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
++if(NOT IDF_TARGET STREQUAL "esp32c3")
++    message(FATAL_ERROR "This gateway uses ESP32-C3. Run idf.py set-target esp32c3.")
++endif()
+ project(iot_gateway)
+diff --git a/esp32/main/bus.c b/esp32/main/bus.c
+index 6c1daf8..8429d80 100644
+--- a/esp32/main/bus.c
++++ b/esp32/main/bus.c
+@@ -11,10 +11,10 @@ static QueueHandle_t uart_events;
+ void bus_init(void)
+ {
+     uart_config_t c = {.baud_rate = BUS_BAUD, .data_bits = UART_DATA_8_BITS, .parity = UART_PARITY_DISABLE, .stop_bits = UART_STOP_BITS_1, .flow_ctrl = UART_HW_FLOWCTRL_DISABLE, .source_clk = UART_SCLK_DEFAULT};
+-    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_2, 1024, 0, 32, &uart_events, 0));
+-    ESP_ERROR_CHECK(uart_param_config(UART_NUM_2, &c));
+-    ESP_ERROR_CHECK(uart_set_pin(UART_NUM_2, RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN, UART_PIN_NO_CHANGE));
+-    ESP_ERROR_CHECK(uart_set_mode(UART_NUM_2, UART_MODE_RS485_HALF_DUPLEX));
++    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_1, 1024, 0, 32, &uart_events, 0));
++    ESP_ERROR_CHECK(uart_param_config(UART_NUM_1, &c));
++    ESP_ERROR_CHECK(uart_set_pin(UART_NUM_1, RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN, UART_PIN_NO_CHANGE));
++    ESP_ERROR_CHECK(uart_set_mode(UART_NUM_1, UART_MODE_RS485_HALF_DUPLEX));
+ }
+ int bus_exchange(uint8_t addr, uint8_t fc, const uint8_t *p, size_t n, uint8_t *out, size_t cap, int timeout_ms, int *activity)
+ {
+@@ -26,17 +26,17 @@ int bus_exchange(uint8_t addr, uint8_t fc, const uint8_t *p, size_t n, uint8_t *
+     memcpy(tx + 2, p, n);
+     put16(tx + 2 + n, crc16(tx, 2 + n));
+     vTaskDelay(pdMS_TO_TICKS(4));
+-    uart_flush_input(UART_NUM_2);
++    uart_flush_input(UART_NUM_1);
+     xQueueReset(uart_events);
+-    uart_write_bytes(UART_NUM_2, tx, n + 4);
+-    uart_wait_tx_done(UART_NUM_2, pdMS_TO_TICKS(100));
++    uart_write_bytes(UART_NUM_1, tx, n + 4);
++    uart_wait_tx_done(UART_NUM_1, pdMS_TO_TICKS(100));
+     int64_t start = esp_timer_get_time(), last = start;
+     size_t used = 0;
+     int seen = 0, bad = 0;
+     while (esp_timer_get_time() - start < (int64_t)timeout_ms * 1000)
+     {
+         uint8_t b[64];
+-        int got = uart_read_bytes(UART_NUM_2, b, sizeof b, pdMS_TO_TICKS(1));
++        int got = uart_read_bytes(UART_NUM_1, b, sizeof b, pdMS_TO_TICKS(1));
+         if (got > 0)
+         {
+             seen = 1;
+@@ -163,9 +163,9 @@ int assign_address(uint8_t address, node_info *assigned)
+     uint8_t tx[8] = {0, 6, (uint8_t)(ADDRESS_REGISTER >> 8), (uint8_t)ADDRESS_REGISTER, 0, address, 0, 0};
+     put16(tx + 6, crc16(tx, 6));
+     vTaskDelay(pdMS_TO_TICKS(4));
+-    uart_flush_input(UART_NUM_2);
++    uart_flush_input(UART_NUM_1);
+     xQueueReset(uart_events);
+-    if (uart_write_bytes(UART_NUM_2, tx, sizeof tx) != (int)sizeof tx || uart_wait_tx_done(UART_NUM_2, pdMS_TO_TICKS(100)) != 0)
++    if (uart_write_bytes(UART_NUM_1, tx, sizeof tx) != (int)sizeof tx || uart_wait_tx_done(UART_NUM_1, pdMS_TO_TICKS(100)) != 0)
+         return -3;
+     /* FC06 broadcast has NO response. Give STM32 time to commit flash. */
+     vTaskDelay(pdMS_TO_TICKS(200));
+diff --git a/esp32/main/ota.c b/esp32/main/ota.c
+index fcd7d0a..1caac03 100644
+--- a/esp32/main/ota.c
++++ b/esp32/main/ota.c
+@@ -109,7 +109,7 @@ int run_ota(const cJSON *j)
+     uint8_t header[48];
+     if (!job || strlen(job) > 63 || !target || !url || strlen(url) > 511 || !mac || !u32(j, "size", &size) || !u32(j, "crc32", &crc) || !u32(j, "version", &version))
+         return 0;
+-    int is_esp = strcmp(target, "esp32") == 0;
++    int is_esp = strcmp(target, "esp32c3") == 0 || strcmp(target, "esp32") == 0;
+     if (!is_esp && strcmp(target, "stm32"))
+         return 0;
+     if (size < 8 || size > (is_esp ? 0x180000u : APP_MAX) || !parse_hex(mac, header + 16, 32))
+diff --git a/esp32/main/secrets.example.h b/esp32/main/secrets.example.h
+index 9feab93..10709b2 100644
+--- a/esp32/main/secrets.example.h
++++ b/esp32/main/secrets.example.h
+@@ -10,9 +10,11 @@
+  * No redirects; URL must be HOST + slash + path. */
+ #define OTA_ORIGIN "https://firmware.example.com"
+ #define POLL_INTERVAL_MS 5000
+-#define RS485_TX_PIN 17
+-#define RS485_RX_PIN 16
+-#define RS485_DE_PIN 4
++/* ESP32-C3 UART1; UART0 remains available for serial console.
++ * GPIO4/5/6 are shared with external JTAG: do not use that JTAG port together. */
++#define RS485_TX_PIN 4
++#define RS485_RX_PIN 5
++#define RS485_DE_PIN 6
+ /* Empty -> ESP-IDF public certificate bundle; otherwise use your private CA PEM.
+  * The same CA is used for MQTT and firmware server. Split if providers differ. */
+ #define CLOUD_CA_PEM ""
+diff --git a/tests/stubs/driver/uart.h b/tests/stubs/driver/uart.h
+index c9865ac..5e39a2c 100644
+--- a/tests/stubs/driver/uart.h
++++ b/tests/stubs/driver/uart.h
+@@ -4,7 +4,7 @@
+ #include "freertos/FreeRTOS.h"
+ #include <assert.h>
+ #define ESP_ERROR_CHECK(x) assert((x)==0)
+-#define UART_NUM_2 2
++#define UART_NUM_1 1
+ #define UART_DATA_8_BITS 8
+ #define UART_PARITY_DISABLE 0
+ #define UART_STOP_BITS_1 1
+diff --git a/tests/stubs/secrets.h b/tests/stubs/secrets.h
+index 2b25eb2..02ac483 100644
+--- a/tests/stubs/secrets.h
++++ b/tests/stubs/secrets.h
+@@ -1,3 +1,3 @@
+-#define RS485_TX_PIN 17
+-#define RS485_RX_PIN 16
+-#define RS485_DE_PIN 4
++#define RS485_TX_PIN 4
++#define RS485_RX_PIN 5
++#define RS485_DE_PIN 6
+diff --git a/tests/test_package.py b/tests/test_package.py
+index c2e3e27..ba32f56 100644
+--- a/tests/test_package.py
++++ b/tests/test_package.py
+@@ -9,6 +9,14 @@ spec=importlib.util.spec_from_file_location('package',Path(__file__).resolve().p
+ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+ 
+ class Packaging(unittest.TestCase):
++    def test_c3_model_and_legacy_alias(self):
++        data=b'firmware-image';key=bytes(range(32))
++        descriptor=struct.pack('<IIII',0x32c3,len(data),zlib.crc32(data),2)
++        expected=hmac.new(key,descriptor+data,hashlib.sha256).hexdigest()
++        for target in ('esp32c3','esp32'):
++            command=module.package(data,key,target,2,'https://example.com/fw.bin')
++            self.assertEqual(command['hmac'],expected)
++            self.assertEqual(command['target'],target)
+     def test_cross_format(self):
+         data=struct.pack('<II',0x20005000,0x08004009)+b'firmware';key=bytes(range(32))
+         command=module.package(data,key,'stm32',2,'https://example.com/fw.bin','01'*12)
+diff --git a/tools/package_firmware.py b/tools/package_firmware.py
+index e65c877..eaa0da9 100644
+--- a/tools/package_firmware.py
++++ b/tools/package_firmware.py
+@@ -13,8 +13,9 @@ from urllib.parse import urlsplit
+ def package(data, key, target, version, url, uid=None, job=None):
+     if len(key)!=32:raise ValueError('key must contain exactly 32 bytes')
+     if not 0<=version<=0xffffffff:raise ValueError('version must be uint32')
+-    if target not in ('esp32','stm32'):raise ValueError('unknown target')
+-    limit=0x180000 if target=='esp32' else 46*1024
++    if target not in ('esp32c3','esp32','stm32'):raise ValueError('unknown target')
++    is_esp=target in ('esp32c3','esp32')
++    limit=0x180000 if is_esp else 46*1024
+     if not 8<=len(data)<=limit:raise ValueError('firmware size exceeds slot or is too small')
+     u=urlsplit(url)
+     if u.scheme!='https' or not u.hostname or u.username or u.password or len(url)>511:
+@@ -24,7 +25,9 @@ def package(data, key, target, version, url, uid=None, job=None):
+         sp,pc=struct.unpack('<II',data[:8])
+         if not (0x20000000<sp<=0x20005000 and sp%8==0 and pc&1 and 0x08004000<=pc&~1<0x08004000+len(data)):
+             raise ValueError('invalid STM32 vectors; link APPLICATION at 0x08004000, not bootloader')
+-    model=0x32 if target=='esp32' else 0x103c8
++    # esp32 remains a legacy command alias, but BOTH names sign the C3 model.
++    # ESP-IDF also validates the target chip in the downloaded image header.
++    model=0x32c3 if is_esp else 0x103c8
+     crc=zlib.crc32(data)&0xffffffff
+     descriptor=struct.pack('<IIII',model,len(data),crc,version)
+     result={'op':'ota','job_id':job or str(uuid.uuid4()),'target':target,'url':url,'size':len(data),'crc32':crc,'version':version,
+@@ -34,7 +37,7 @@ def package(data, key, target, version, url, uid=None, job=None):
+ 
+ def main():
+     p=argparse.ArgumentParser();p.add_argument('firmware',type=Path);p.add_argument('--key',type=Path,default=Path(__file__).with_name('ota-key.bin'))
+-    p.add_argument('--target',required=True,choices=['esp32','stm32']);p.add_argument('--version',required=True,type=int);p.add_argument('--url',required=True);p.add_argument('--uid');p.add_argument('--job-id');p.add_argument('--output',type=Path)
++    p.add_argument('--target',required=True,choices=['esp32c3','esp32','stm32']);p.add_argument('--version',required=True,type=int);p.add_argument('--url',required=True);p.add_argument('--uid');p.add_argument('--job-id');p.add_argument('--output',type=Path)
+     a=p.parse_args()
+     try:command=package(a.firmware.read_bytes(),a.key.read_bytes(),a.target,a.version,a.url,a.uid,a.job_id)
+     except (OSError,ValueError) as e:p.error(str(e))
+-- 
+2.51.1
+
