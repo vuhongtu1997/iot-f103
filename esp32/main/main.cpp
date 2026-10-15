@@ -18,10 +18,6 @@
 #include "Led.h"
 #include "Log.h"
 
-#ifdef CONFIG_ENABLE_BLE
-#include "BleProtocol.h"
-#endif
-
 extern void gpio_init(void);
 
 void *operator new(size_t size)
@@ -68,47 +64,31 @@ extern "C" void app_main(void)
   Led_init();
   gpio_init();
   ButtonSignal *buttonSignal = ButtonSignal::getInstance();
-  bool bootConfigMode = buttonSignal->CheckBootConfigRequest();
 
-  Wifi::Init(bootConfigMode);
-  Sntp::init(!bootConfigMode && Wifi::WaitConnecting());
+  Wifi::Init();
+  Sntp::init(Wifi::WaitConnecting());
   buttonSignal->Init();
-  if (bootConfigMode)
-  {
-    buttonSignal->EnterConfigMode();
-  }
 
   Database::getInstance()->Init();
-  if (!bootConfigMode)
+  for (int i = 0; i < 2; i++)
   {
-    for (int i = 0; i < 2; i++)
-    {
-      SetLedInternet(true);
-      SetLedService(true);
-      usleep(200000);
-      SetLedInternet(false);
-      SetLedService(false);
-      usleep(200000);
-    }
-
+    SetLedInternet(true);
     SetLedService(true);
+    usleep(200000);
     SetLedInternet(false);
+    SetLedService(false);
+    usleep(200000);
   }
+
+  SetLedService(true);
+  SetLedInternet(false);
 
   SetLedInternetConnected(Wifi::IsNetworkConnected());
   SetLedServerConnected(false);
 
   // TimerSchedule::getInstance()->Init();
 
-#ifdef CONFIG_ENABLE_BLE
-  BleProtocol::getInstance()->Init();
-#endif
-
   Gateway::getInstance()->Init();
-
-#ifdef CONFIG_ENABLE_BLE
-  BleProtocol::getInstance()->InitKey();
-#endif
 
   while (true)
   {

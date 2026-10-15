@@ -1,0 +1,29 @@
+dependencies:
+  idf:
+    source:
+      type: idf
+    version: 5.4.3
+  joltwallet/littlefs:
+    component_hash: 8e12955f47e27e6070b76715a96d6c75fc2b44f069e8c33679332d9bdd3120c4
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.20.1
+  nopnop2002/sqlite3:
+    component_hash: 5f15f87e2a4e660b99ddf95db8ced945090c1ba0fe52630fe262b1d77fee7317
+    dependencies: []
+    source:
+      git: https://github.com/nopnop2002/esp32-idf-sqlite3.git
+      path: components/esp32-idf-sqlite3/
+      type: git
+    version: 52a0d62cae413ca99efb07f3cc4aaa21d1c14f74
+direct_dependencies:
+- joltwallet/littlefs
+- nopnop2002/sqlite3
+manifest_hash: 710021c3d1f1b0b1ee029f29c94aeedc5d6efbea6e2f34bf30b2ea75455b5de0
+target: esp32c3
+version: 2.0.0

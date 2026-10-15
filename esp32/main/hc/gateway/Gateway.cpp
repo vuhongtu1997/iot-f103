@@ -1,7 +1,5 @@
 #include "Gateway.h"
 #include "Base64.h"
-#include "BleDeviceConfigs.h"
-#include "BleProtocol.h"
 #include "ButtonSignal.h"
 #include "Config.h"
 #include "Database.h"
@@ -11,14 +9,12 @@
 #include "Wifi.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <unistd.h>
 
 #ifdef ESP_PLATFORM
 #include "Led.h"
 #endif
-
-static constexpr time_t BLE_BROADCAST_HEALTH_INTERVAL = 420;
-static constexpr time_t BLE_BROADCAST_HEALTH_TIMEOUT = 120;
 
 Gateway *Gateway::getInstance()
 {
@@ -39,8 +35,7 @@ Gateway *Gateway::getInstance()
 Gateway::Gateway(string mac, string address, int port, string clientId,
                  string username, string password, int keepalive)
     : CloudProtocol(mac, address, port, clientId, username, password,
-                    keepalive, false),
-      Udp(8181)
+                    keepalive, false)
 {
   this->mac = mac;
   id = "";
@@ -52,18 +47,12 @@ Gateway::Gateway(string mac, string address, int port, string clientId,
   ble_appkey = "";
   ble_devicekey = "";
   data = "";
-  lastTimePingGwBle = time(nullptr);
-  broadcastHealthPending = false;
-  broadcastHealthStartTime = 0;
-  processingSceneGroup = false;
-  InitUdpMessage();
 }
 
 Gateway::~Gateway() {}
 
 void Gateway::Init()
 {
-  Device::InitDeviceModelList();
   Database::getInstance()->GatewayRead();
   if (GetBleNetKey().empty() && GetBleAppKey().empty() &&
       GetBleDeviceKey().empty() && GetBleAddr() == 0)
@@ -72,27 +61,17 @@ void Gateway::Init()
   }
   CloudProtocol::init();
   InitMqttMessageDevice();
-  InitMqttMessageGroup();
-  InitMqttMessageRoom();
   InitMqttMessageRule();
-  InitMqttMessageScene();
-  InitMqttMessageHc();
+  InitMqttMessageRs485();
 
   Database::getInstance()->DeviceRead();
-  Database::getInstance()->DeviceBleChildRead();
+  if (!ModbusBusInit())
+    LOGE("RS485 Modbus initialization failed");
 #ifdef CONFIG_SAVE_ATTRIBUTE
   Database::getInstance()->DeviceAttributeRead();
 #endif
-  Database::getInstance()->RoomRead();
-  Database::getInstance()->GroupRead();
-  Database::getInstance()->DeviceInGroupRead();
-  Database::getInstance()->DeviceInRoomRead();
   Database::getInstance()->RuleRead();
 }
-
-void Gateway::StartUdpService() { Udp::init(); }
-
-void Gateway::StopUdpService() { Udp::stop(); }
 
 void Gateway::OnCloudConnect(bool isConnected, bool isReconnect)
 {
@@ -103,7 +82,6 @@ void Gateway::OnCloudConnect(bool isConnected, bool isReconnect)
 #ifdef ESP_PLATFORM
     SetLedServerConnected(true);
     ButtonSignal::getInstance()->CompleteConfigMode();
-    Wifi::DisableConfigAccessPoint();
 #endif
     OnlineHC();
   }
@@ -120,30 +98,16 @@ void Gateway::ResetFactory()
 {
   LOGI("ResetFactory");
   Database::getInstance()->DelDatabase();
-#ifdef CONFIG_ENABLE_BLE
-  LOGI("Factory reset: BLE delete all result=%d",
-       BleProtocol::getInstance()->ResetDelAll());
-  LOGI("Factory reset: BLE gateway reset result=%d",
-       BleProtocol::getInstance()->ResetGateway());
-  BleProtocol::getInstance()->ResetFactory();
-#endif
   bool configCleared = Config::getInstance()->ClearProvisioningData();
   bool wifiCleared = Wifi::ClearStoredCredentials();
   LOGI("Factory reset: configCleared=%d wifiCleared=%d",
        configCleared ? 1 : 0, wifiCleared ? 1 : 0);
 }
 
-int Gateway::RestartBleGw()
-{
-  LOGW("Restart Gateway Ble");
-  return CODE_OK;
-}
-
 int Gateway::CheckOnlineThread()
 {
   LOGI("Start CheckOnlineThread");
   time_t lastGatewayHeartbeat = 0;
-  time_t lastBleBroadcastHealth = 0;
   uint32_t lastNetworkRevision = Wifi::GetNetworkRevision();
 
   while (true)
@@ -164,61 +128,6 @@ int Gateway::CheckOnlineThread()
       lastGatewayHeartbeat = currentTime;
     }
 
-#ifdef CONFIG_ENABLE_BLE
-    vector<Device *> devices;
-    DeviceManager::getInstance()->ForEach([&](Device *device)
-                                          {
-      if (device->GetProtocol() == BLE_DEVICE)
-        devices.push_back(device); });
-
-    if (!devices.empty() && CloudProtocol::IsConnected() &&
-        !BleProtocol::getInstance()->IsProvision() &&
-        !CloudProtocol::IsBusy() && BleProtocol::getInstance()->isInitKey)
-    {
-      bool startBroadcast = false;
-      bool finishBroadcast = false;
-      {
-        lock_guard<mutex> lock(broadcastHealthMtx);
-        startBroadcast = !broadcastHealthPending &&
-                         currentTime - lastBleBroadcastHealth >=
-                             BLE_BROADCAST_HEALTH_INTERVAL;
-        finishBroadcast = broadcastHealthPending &&
-                          currentTime - broadcastHealthStartTime >=
-                              BLE_BROADCAST_HEALTH_TIMEOUT;
-      }
-
-      if (startBroadcast &&
-          BleProtocol::getInstance()->GetDevicesOnOffBroadcast() == CODE_OK)
-      {
-        lock_guard<mutex> lock(broadcastHealthMtx);
-        broadcastHealthPending = true;
-        broadcastHealthStartTime = time(nullptr);
-        broadcastHealthRespondedIds.clear();
-        lastBleBroadcastHealth = broadcastHealthStartTime;
-      }
-
-      if (finishBroadcast)
-      {
-        set<string> respondedIds;
-        {
-          lock_guard<mutex> lock(broadcastHealthMtx);
-          broadcastHealthPending = false;
-          respondedIds = broadcastHealthRespondedIds;
-          broadcastHealthRespondedIds.clear();
-        }
-        for (Device *device : devices)
-        {
-          string deviceId = device->GetId().empty() ? device->GetMac()
-                                                    : device->GetId();
-          if (respondedIds.find(deviceId) != respondedIds.end() ||
-              IsIrBleDevice(device))
-            continue;
-          device->lastOnlineState = false;
-          PushDeviceOnlineState(device, false);
-        }
-      }
-    }
-#endif
     sleep(1);
   }
   return CODE_OK;
@@ -312,13 +221,6 @@ int Gateway::PushGatewayStatus()
   int deviceCount = 0;
   DeviceManager::getInstance()->ForEach([&](Device *)
                                         { deviceCount++; });
-  int groupCount = 0;
-  GroupManager::getInstance()->ForEach([&](Group *)
-                                       { groupCount++; });
-  int sceneCount = 0;
-  SceneManager::getInstance()->ForEach([&](Scene *)
-                                       { sceneCount++; });
-
   Json::Value payload;
   payload["cmd"] = "hcInfo";
   payload["rqi"] = Util::GenRandRQI(16);
@@ -328,169 +230,51 @@ int Gateway::PushGatewayStatus()
   info["nameWifi"] = Wifi::GetSSID();
   info["isHCmini"] = true;
   info["deviceCount"] = deviceCount;
-  info["groupCount"] = groupCount;
-  info["sceneCount"] = sceneCount;
   info["maxDevice"] = 30;
-  info["maxGroup"] = 50;
-  info["maxScene"] = 50;
   return CloudPublish(payload);
 }
 
-int Gateway::PublishProvisionedDevice(Device *device)
+int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
+                                    const uint16_t registers[12], bool online)
 {
-  if (!device)
+  char uid[25];
+  bool hasUid = false;
+  for (size_t i = 0; i < sizeof(node.uid); ++i)
   {
-    LOGE("Cannot publish newDev: device is null");
-    return CODE_ERROR;
-  }
-  if (!CloudProtocol::IsConnected())
-  {
-    LOGE("Cannot publish newDev for %s: cloud is disconnected",
-         device->GetMac().c_str());
-    return CODE_TIMEOUT;
+    snprintf(uid + i * 2, sizeof(uid) - i * 2, "%02x", node.uid[i]);
+    hasUid = hasUid || node.uid[i] != 0;
   }
 
-  Json::Value deviceData = device->GetData();
-  string deviceKey = deviceData.get("devicekey", "").asString();
-  if (deviceKey.empty())
-    deviceKey = deviceData.get("deviceKey", "").asString();
-  if (deviceKey.empty())
+  Json::Value device;
+  string deviceId;
+  if (hasUid)
+    deviceId = uid;
+  else
+    deviceId = "pending-" + std::to_string(node.address);
+  device["id"] = string("rs485-") + deviceId;
+  device["data"]["address"] = node.address;
+  device["data"]["uid"] = uid;
+  device["data"]["stt"] = online ? 1 : 0;
+  if (online)
   {
-    LOGE("Cannot publish newDev for %s: devicekey is missing",
-         device->GetMac().c_str());
-    return CODE_FORMAT_ERROR;
+    device["data"]["version"] = static_cast<Json::UInt64>(
+        (static_cast<uint32_t>(registers[2]) << 16) | registers[3]);
+    device["data"]["mode"] = registers[4];
+    device["data"]["adc_raw"] = registers[0];
+    device["data"]["millivolts"] = registers[1];
+    device["data"]["quality"] = registers[4] ? "bootloader"
+                                  : registers[0] == 0xffff ? "sensor_error"
+                                                           : "ok";
   }
-  transform(deviceKey.begin(), deviceKey.end(), deviceKey.begin(),
-            [](unsigned char ch)
-            {
-              return static_cast<char>(std::tolower(ch));
-            });
-
-  const Json::UInt meshPid = deviceData.get("meshPid", Json::UInt(deviceData.get("deviceType", 0).asUInt() & 0xFFFF)).asUInt();
-  const Json::UInt meshVid = deviceData.get("meshVid", Json::UInt(device->GetVersion())).asUInt();
-  const Json::UInt deviceType = deviceData.get("deviceType", 0).asUInt();
-
-  string cloudId = deviceData.get("device_id", "").asString();
-  if (cloudId.empty())
-    cloudId = deviceKey;
-  transform(cloudId.begin(), cloudId.end(), cloudId.begin(),
-            [](unsigned char ch)
-            {
-              return static_cast<char>(std::tolower(ch));
-            });
-
-  Json::Value value;
-  value["id"] = cloudId;
-  value["addr"] = Json::UInt(device->GetAddr());
-  value["mac"] = "";
-  value["type"] = deviceType;
-  value["data"]["devicekey"] = deviceKey;
-  value["data"]["vid"] = meshVid;
-  value["data"]["pid"] = meshPid;
-
-  Json::Value payload;
-  payload["cmd"] = "newDev";
-  payload["rqi"] = Util::GenRandRQI(16);
-  payload["data"]["device"] = Json::arrayValue;
-  payload["data"]["device"].append(value);
-  LOGI("Publishing provisioned device with newDev: addr=0x%04X",
-       device->GetAddr());
-  return CloudPublish(payload);
-}
-
-time_t Gateway::GetLastTimePingGwBle() { return lastTimePingGwBle; }
-void Gateway::SetLastTimePingGwBle(time_t value) { lastTimePingGwBle = value; }
-
-int Gateway::AddDeviceToControlResponse(Device *device,
-                                        Json::Value &dataValue)
-{
-  if (!device)
-    return CODE_ERROR;
-  if (listControlObj.empty())
-    return CODE_ERROR;
-
-  lock_guard<mutex> lock(listControlObjMutex);
-  bool matched = false;
-  for (auto &[id, type] : listControlObj)
+  else
   {
-    if (type == 0)
-    {
-      Group *group = GroupManager::getInstance()->GetGroupFromId(id);
-      if (group && group->IsDevIn(device))
-      {
-        group->AddDataToListRsp(device, dataValue);
-        matched = true;
-      }
-    }
-    else if (type == 1)
-    {
-      Room *room = RoomManager::getInstance()->GetRoomFromId(id);
-      if (room && room->IsDevIn(device))
-      {
-        room->AddDataToListRsp(device, dataValue);
-        matched = true;
-      }
-    }
-    else if (type == 2)
-    {
-      Scene *scene = SceneManager::getInstance()->GetSceneFromId(id);
-      if (scene && scene->IsDevIn(device))
-      {
-        scene->AddDataToListRsp(device, dataValue);
-        matched = true;
-      }
-    }
+    device["data"]["version"] = static_cast<Json::UInt64>(node.version);
+    device["data"]["mode"] = node.mode;
+    device["data"]["quality"] = "offline";
   }
-  return matched ? CODE_OK : CODE_ERROR;
-}
 
-void Gateway::SetProcessingSceneGroup(bool processing)
-{
-  processingSceneGroup.store(processing);
-}
-
-bool Gateway::IsProcessingSceneGroup() const
-{
-  return processingSceneGroup.load();
-}
-
-void Gateway::MarkBleBroadcastResponse(Device *device)
-{
-  if (!device)
-    return;
-  bool shouldPublish = false;
-  string deviceId = device->GetId().empty() ? device->GetMac()
-                                            : device->GetId();
-  {
-    lock_guard<mutex> lock(broadcastHealthMtx);
-    if (broadcastHealthPending)
-      shouldPublish = broadcastHealthRespondedIds.insert(deviceId).second;
-  }
-  device->lastOnlineState = true;
-  if (shouldPublish)
-    PushDeviceOnlineState(device, true);
-}
-
-bool Gateway::IsIrBleDevice(Device *device)
-{
-  if (!device)
-    return false;
-  if (device->GetType() == "HG_BLE_IR")
-    return true;
-
-  Json::Value value = device->GetData();
-  string pid = value.get("pid", "").asString();
-  if (pid.empty() && value.isMember("devices") && value["devices"].isString())
-  {
-    vector<string> tokens = Util::splitString(value["devices"].asString(), '|');
-    if (tokens.size() > 1)
-      pid = tokens[1];
-  }
-  return pid == HG_BLE_IR || pid == HG_BLE_IR_TV || pid == HG_BLE_IR_FAN ||
-         pid == HG_BLE_IR_AC || pid == HG_BLE_IR_REMOTE ||
-         pid == HG_BLE_IR_V2 || pid == HG_BLE_IR_TV_V2 ||
-         pid == HG_BLE_IR_FAN_V2 || pid == HG_BLE_IR_AC_V2 ||
-         pid == HG_BLE_IR_REMOTE_V2 || pid == HG_BLE_IR_BLE ||
-         pid == HG_BLE_IR_TV_V2_LAO || pid == HG_BLE_IR_FAN_V2_LAO ||
-         pid == HG_BLE_IR_AC_V2_LAO || pid == HG_BLE_IR_REMOTE_V2_LAO;
+  Json::Value update;
+  update["device"] = Json::arrayValue;
+  update["device"].append(device);
+  return PushDeviceUpdateCloud(update);
 }

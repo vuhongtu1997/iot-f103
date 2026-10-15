@@ -4,8 +4,7 @@
  *
  * File này định nghĩa lớp `Database`, chịu trách nhiệm thao tác với
  * cơ sở dữ liệu SQLite: đọc, ghi, cập nhật và xóa thông tin về các
- * thực thể như thiết bị (Device), nhóm (Group), phòng (Room), cảnh (Scene),
- * luật (Rule) và gateway.
+ * thực thể như thiết bị (Device), luật (Rule) và gateway.
  *
  * Lớp được triển khai theo mẫu Singleton nhằm đảm bảo chỉ có một kết nối
  * cơ sở dữ liệu duy nhất trong toàn hệ thống, giúp tránh xung đột truy cập.
@@ -33,7 +32,7 @@
 class Database {
 private:
   sqlite3 *db; /**< Con trỏ tới cơ sở dữ liệu SQLite hiện tại */
-  std::mutex mtx; /**< Mutex dùng để bảo vệ truy cập đồng thời */
+  std::recursive_mutex mtx; /**< Mutex bảo vệ cả transaction lẫn các query lồng nhau */
 
   /**
    * @brief Hàm khởi tạo riêng tư (theo mẫu Singleton).
@@ -102,6 +101,7 @@ public:
    * @brief Kết thúc transaction SQLite.
    */
   int SqliteEndTransaction();
+  int SqliteRollbackTransaction();
 
   //==================================================================
   // Các nhóm thao tác dữ liệu
@@ -144,56 +144,6 @@ public:
                         Json::Value &rows);
   /** @} */
 
-  /** @name Thiết bị con BLE (Device BLE Child)
-   *  @{
-   */
-  int DeviceBleChildRead();
-  int DeviceBleChildAdd(Device *child, Device *parent, std::string data);
-  int DeviceBleChildAdd(std::string childId, std::string parentId, std::string data);
-  int DeviceBleChildUpdateData(Device *child, Device *parent, std::string data);
-  int DeviceBleChildDel(Device *child, Device *parent);
-  int DeviceBleChildDelAll();
-  /** @} */
-
-#if 1 // Group feature disabled
-	/** @name Liên kết thiết bị - nhóm (DeviceInGroup)
-	 *  @{
-	 */
-	int DeviceInGroupRead();
-	int DeviceInGroupAdd(Group *group, Device *device, uint16_t epId);
-	int DeviceInGroupDel(Group *group, Device *device, uint16_t epId);
-	int DeviceInGroupDelDev(std::string deviceId);
-	int DeviceInGroupDelDev(Device *device);
-	int DeviceInGroupDelAll();
-	/** @} */
-#endif
-
-#if 1 // Room feature disabled
-	/** @name Liên kết thiết bị - phòng (DeviceInRoom)
-	 *  @{
-	 */
-	int DeviceInRoomRead();
-	int DeviceInRoomAdd(Room *room, Device *device, uint16_t epId);
-	int DeviceInRoomDel(Room *room, Device *device, uint16_t epId);
-	int DeviceInRoomDelDev(std::string deviceId);
-	int DeviceInRoomDelDev(Device *device);
-	int DeviceInRoomDelAll();
-	/** @} */
-#endif
-
-#if 1 // Scene feature disabled
-	/** @name Liên kết thiết bị - cảnh (DeviceInScene)
-	 *  @{
-	 */
-	int DeviceInSceneRead();
-	int DeviceInSceneAdd(Scene *scene, Device *device, std::string data);
-	int DeviceInSceneDel(Scene *scene, Device *device);
-	int DeviceInSceneDelDev(std::string deviceId);
-	int DeviceInSceneDelDev(Device *device);
-	int DeviceInSceneDelAll();
-	/** @} */
-#endif
-
   /** @name Gateway
    *  @{
    */
@@ -214,34 +164,6 @@ public:
   int GatewayDelAll();
   /** @} */
 
-#if 1 // Group feature disabled
-	/** @name Nhóm (Group)
-	 *  @{
-	 */
-	int GroupRead();
-	int GroupAdd(Group *group);
-	int GroupUpdate(Group *group);
-	int GroupUpdateRoom(Group *group, std::string roomId);
-	int GroupDel(Group *group);
-	int GroupDel(std::string id);
-	int GroupDelAll();
-	/** @} */
-#endif
-
-#if 1 // Room feature disabled
-	/** @name Phòng (Room)
-	 *  @{
-	 */
-	int RoomRead();
-	int RoomAdd(Room *room);
-	int RoomUpdateName(Room *room);
-	int RoomUpdateData(Room *room);
-	int RoomDel(Room *room);
-	int RoomDel(std::string id);
-	int RoomDelAll();
-	/** @} */
-#endif
-
 #if 1 // Rule feature disabled
 	/** @name Kịch bản (Rule)
 	 *  @{
@@ -260,18 +182,4 @@ public:
 	/** @} */
 #endif
 
-#if 1 // Scene feature disabled
-	/** @name Cảnh (Scene)
-	 *  @{
-	 */
-	int SceneRead();
-	int SceneAdd(Scene *scene);
-	int SceneUpdate(Scene *scene);
-	int SceneUpdateRoom(Scene *scene, std::string roomId);
-	int SceneDel(Scene *scene);
-	int SceneDel(std::string id);
-	int SceneDelAll();
-	int SceneUpdateFavorite(Scene *scene);
-	/** @} */
-#endif
 };

@@ -76,8 +76,6 @@ static void ButtonSignalHandler(void *arg)
 				buttonSignal->isConfigMode = false;
 				buttonSignal->isConfigHcMode = false;
 				button_released_after_config_entry = false;
-				Gateway::getInstance()->StopUdpService();
-				LOGI("UDP service stopped before restart");
 				ExitLedConfigMode();
 				esp_restart();
 			}
@@ -218,9 +216,6 @@ void ButtonSignal::EnterConfigMode()
 	isConfigHcMode = false;
 	button_released_after_config_entry = false;
 
-	Wifi::WifiStartAP();
-	Gateway::getInstance()->StartUdpService();
-	LOGI("UDP service started for AP config mode");
 	EnterLedConfigMode();
 }
 
@@ -239,8 +234,6 @@ void ButtonSignal::CompleteConfigMode()
 		return;
 
 	LOGI("Cloud connected - completing config mode");
-	Gateway::getInstance()->StopUdpService();
-	LOGI("UDP service stopped after leaving AP config mode");
 	isConfigMode = false;
 	isConfigHcMode = false;
 	button_released_after_config_entry = false;

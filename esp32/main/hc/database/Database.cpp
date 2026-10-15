@@ -234,15 +234,9 @@ int Database::CreateTableIfNotExists()
 		"CREATE TABLE IF NOT EXISTS DeviceAttribute (device_id VARCHAR NOT NULL, attribute TEXT, value DOUBLE, PRIMARY KEY (device_id, attribute)) WITHOUT ROWID;",
 		"CREATE TABLE IF NOT EXISTS DeviceHistory (id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER, cause_type INTEGER, cause_id TEXT, event_type INTEGER, device_id TEXT, dp_id INTEGER, dp_value TEXT);",
 		"CREATE INDEX IF NOT EXISTS DeviceHistoryTimeDevice ON DeviceHistory(device_id, time DESC);",
-		"CREATE TABLE IF NOT EXISTS DeviceBleChild (device_id VARCHAR NOT NULL, parent_id VARCHAR NOT NULL, data TEXT, PRIMARY KEY (device_id, parent_id)) WITHOUT ROWID;",
-		"CREATE TABLE IF NOT EXISTS DeviceInGroup (group_id VARCHAR NOT NULL, device_id VARCHAR NOT NULL, element INTEGER, create_at INTEGER, data TEXT, PRIMARY KEY (group_id, device_id, element)) WITHOUT ROWID;",
-		"CREATE TABLE IF NOT EXISTS DeviceInRoom (room_id VARCHAR NOT NULL, device_id VARCHAR NOT NULL, element INTEGER, create_at INTEGER, data TEXT, PRIMARY KEY (room_id, device_id, element)) WITHOUT ROWID;",
-		"CREATE TABLE IF NOT EXISTS DeviceInScene (scene_id VARCHAR NOT NULL, device_id VARCHAR NOT NULL, create_at INTEGER, data TEXT, PRIMARY KEY (scene_id, device_id)) WITHOUT ROWID;",
 		"CREATE TABLE IF NOT EXISTS Gateway (mac VARCHAR NOT NULL ,gateway_id VARCHAR, name VARCHAR, version VARCHAR, ble_netkey VARCHAR, ble_appkey VARCHAR, ble_devicekey VARCHAR, ble_addr INTEGER, ble_iv_index INTEGER, dormitory TEXT, refresh_token TEXT, zigbee_netkey VARCHAR, create_at INTEGER, data TEXT, PRIMARY KEY (mac)) WITHOUT ROWID;",
-		"CREATE TABLE IF NOT EXISTS [Group] (group_id VARCHAR NOT NULL, group_addr INTEGER, name VARCHAR, room_id TEXT, create_at INTEGER, data TEXT, PRIMARY KEY (group_id)) WITHOUT ROWID;",
-		"CREATE TABLE IF NOT EXISTS Room (room_id VARCHAR NOT NULL, room_addr INTEGER, name VARCHAR, create_at INTEGER, data TEXT, PRIMARY KEY (room_id)) WITHOUT ROWID;",
 		"CREATE TABLE IF NOT EXISTS Rule (rule_id VARCHAR NOT NULL, data TEXT NOT NULL, type INTEGER, enable BOOLEAN, rule_addr INTEGER, create_at INTEGER, is_favorite BOOLEAN, is_first_run BOOLEAN, PRIMARY KEY (rule_id)) WITHOUT ROWID;",
-		"CREATE TABLE IF NOT EXISTS Scene (scene_id VARCHAR NOT NULL, scene_addr INTEGER, name VARCHAR, room_id TEXT, is_favorite BOOLEAN, create_at INTEGER, data TEXT, PRIMARY KEY (scene_id)) WITHOUT ROWID;"};
+		};
 
 	int rc = SQLITE_OK;
 	for (size_t i = 0; i < sizeof(statements) / sizeof(statements[0]); ++i)
@@ -272,7 +266,7 @@ int Database::DeviceHistoryAdd(const string &deviceId, int dpId,
 	sqlite3_stmt *stmt = nullptr;
 	int rc;
 
-	lock_guard<mutex> lock(mtx);
+	lock_guard<recursive_mutex> lock(mtx);
 	rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
 	if (rc == SQLITE_OK)
 	{
@@ -330,7 +324,7 @@ int Database::DeviceHistoryFind(const string &deviceId, uint64_t startTime,
 	sqlite3_stmt *stmt = nullptr;
 	int rc;
 
-	lock_guard<mutex> lock(mtx);
+	lock_guard<recursive_mutex> lock(mtx);
 	rc = sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr);
 	if (rc != SQLITE_OK)
 	{
@@ -398,10 +392,12 @@ int Database::SqliteBenginTransaction()
 	rc = sqlite3_exec(db, "BEGIN TRANSACTION", NULL, NULL, &err_msg);
 	if (rc != SQLITE_OK)
 	{
-		LOGE("Error executing sql statement :%s", err_msg);
-		sqlite3_free(err_msg);
+		LOGE("Error executing sql statement: %s",
+			 err_msg ? err_msg : "unknown error");
+		if (err_msg)
+			sqlite3_free(err_msg);
+		mtx.unlock();
 	}
-	mtx.unlock();
 	return rc;
 }
 
@@ -409,12 +405,30 @@ int Database::SqliteEndTransaction()
 {
 	int rc = SQLITE_ERROR;
 	char *err_msg = 0;
-	mtx.lock();
 	rc = sqlite3_exec(db, "COMMIT", NULL, NULL, &err_msg);
 	if (rc != SQLITE_OK)
 	{
-		LOGE("Error executing sql statement :%s", err_msg);
-		sqlite3_free(err_msg);
+		LOGE("Error executing sql statement: %s",
+			 err_msg ? err_msg : "unknown error");
+		if (err_msg)
+			sqlite3_free(err_msg);
+		sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+	}
+	mtx.unlock();
+	return rc;
+}
+
+int Database::SqliteRollbackTransaction()
+{
+	int rc = SQLITE_ERROR;
+	char *err_msg = 0;
+	rc = sqlite3_exec(db, "ROLLBACK", NULL, NULL, &err_msg);
+	if (rc != SQLITE_OK)
+	{
+		LOGE("Error rolling back SQLite transaction: %s",
+			 err_msg ? err_msg : "unknown error");
+		if (err_msg)
+			sqlite3_free(err_msg);
 	}
 	mtx.unlock();
 	return rc;

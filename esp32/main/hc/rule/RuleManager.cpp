@@ -2,16 +2,11 @@
 #include "Log.h"
 #include "Util.h"
 #include "DeviceManager.h"
-#include "GroupManager.h"
-#include "SceneManager.h"
 #include "RuleInputDevice.h"
 #include "RuleInputTimer.h"
 #include "RuleOutputDelay.h"
 #include "RuleOutputDevice.h"
 #include "RuleOutputGateway.h"
-#include "RuleOutputGroup.h"
-#include "RuleOutputScene.h"
-#include "BleProtocol.h"
 #include "Device.h"
 #include "Database.h"
 
@@ -74,6 +69,16 @@ Rule *RuleManager::AddRule(Json::Value &ruleValue)
 		int type = ruleValue["type"].asInt();
 		Json::Value inputValue = ruleValue["input"];
 		Json::Value outputValues = ruleValue["output"];
+		for (const auto &outputValue : outputValues)
+		{
+			if (outputValue.isObject() &&
+				(outputValue.isMember("groupId") ||
+				 outputValue.isMember("sceneId")))
+			{
+				LOGE("Rule uses an unsupported output type");
+				return NULL;
+			}
+		}
 		string name = ruleValue["name"].asString();
 		int repeat = 255;
 		uint16_t addr = 0;
@@ -175,33 +180,6 @@ Rule *RuleManager::AddRule(Json::Value &ruleValue)
 						}
 						else
 							LOGW("Device not found");
-					}
-				}
-				else if (outputValue.isMember("groupId"))
-				{
-					if (outputValue["groupId"].isString() && outputValue.isMember("data") && outputValue["data"].isObject())
-					{
-						Json::Value dataValue = outputValue["data"];
-						string id = outputValue["groupId"].asString();
-						Group *group = GroupManager::getInstance()->GetGroupFromId(id);
-						if (group)
-						{
-							RuleOutputGroup *ruleOutputGroup = new RuleOutputGroup(group, dataValue);
-							rule->AddRuleOutput(ruleOutputGroup);
-						}
-					}
-				}
-				else if (outputValue.isMember("sceneId"))
-				{
-					if (outputValue["sceneId"].isString())
-					{
-						string id = outputValue["sceneId"].asString();
-						Scene *scene = SceneManager::getInstance()->GetSceneFromId(id);
-						if (scene)
-						{
-							RuleOutputScene *ruleOutputScene = new RuleOutputScene(scene);
-							rule->AddRuleOutput(ruleOutputScene);
-						}
 					}
 				}
 			}

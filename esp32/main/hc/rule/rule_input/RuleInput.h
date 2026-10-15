@@ -4,7 +4,7 @@
  *
  * RuleInput là lớp trừu tượng (abstract base class) đại diện cho một đầu vào
  * có thể kích hoạt Rule. Các lớp con sẽ triển khai chi tiết cách kiểm tra trạng thái
- * của đầu vào (ví dụ: Timer, Device, Group...).
+ * của đầu vào (ví dụ: Timer hoặc Device).
  *
  * @note Lớp này chỉ định trạng thái khả dụng của đầu vào thông qua biến isAvailable.
  */

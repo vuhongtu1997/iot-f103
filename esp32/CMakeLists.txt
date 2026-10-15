@@ -1,3 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
+set(IDF_TARGET "esp32c3" CACHE STRING "Gateway target")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+if(NOT IDF_TARGET STREQUAL "esp32c3")
+    message(FATAL_ERROR "This gateway targets ESP32-C3; run idf.py set-target esp32c3.")
+endif()
 project(iot_gateway)

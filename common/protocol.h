@@ -27,10 +27,16 @@ static inline uint16_t get16(const uint8_t *p) {return (uint16_t)(p[0]|p[1]<<8);
 static inline uint32_t get32(const uint8_t *p) {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static inline void put16(uint8_t *p,uint16_t v) {p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
 static inline void put32(uint8_t *p,uint32_t v) {for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(8*i));}
+#ifdef __cplusplus
+extern "C" {
+#endif
 uint16_t crc16(const void *,size_t);
 uint32_t crc32_update(uint32_t,const void *,size_t);
 int prefix_matches(const uint8_t uid[12],const uint8_t prefix[12],unsigned bits);
 int constant_equal(const void *,const void *,size_t);
+#ifdef __cplusplus
+}
+#endif
 /* Header in external flash: descriptor[16], HMAC[32], READY[4], consumed[4]. */
 #define STAGE_HEADER_SIZE 56
 #endif

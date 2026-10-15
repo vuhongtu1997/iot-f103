@@ -20,7 +20,7 @@
 //======================================================================
 
 /** @brief GPIO đầu vào (nút bấm vật lý) */
-#define GPIO_INPUT_IO_0 GPIO_NUM_35
+#define GPIO_INPUT_IO_0 BTN
 /** @brief Bit mask chọn GPIO input */
 #define GPIO_INPUT_PIN_SEL (1ULL << GPIO_INPUT_IO_0)
 

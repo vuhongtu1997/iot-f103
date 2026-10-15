@@ -228,110 +228,13 @@ int Device::PushTelemetry()
 int Device::PushTelemetry(Json::Value &telemetryValue)
 {
   if (!telemetryValue.isNull())
-  {
-    Json::Value reported;
-    reported["sender"] = 11;
-    reported["type"] = 9;
-
-    Json::Value dev;
-    dev["state"] = 2; // Online
-    dev["dictDPs"] = telemetryValue;
-
-    reported[GetCloudId()] = dev;
-
-    int rs = Gateway::getInstance()->AddDeviceToControlResponse(this, reported);
-    if (rs != CODE_OK)
-      rs = Gateway::getInstance()->PushDeviceUpdateCloud(this, telemetryValue);
-    return rs;
-  }
+    return Gateway::getInstance()->PushDeviceUpdateCloud(this, telemetryValue);
   return CODE_ERROR;
 }
 
 int Device::PushOnlineState(bool isOnline)
 {
-  Json::Value reported;
-  reported["sender"] = 11;
-  reported["type"] = 9;
-
-  Json::Value dev;
-  dev["state"] = isOnline ? 2 : 3;
-  reported[GetCloudId()] = dev;
-
-  int rs = Gateway::getInstance()->AddDeviceToControlResponse(this, reported);
-  if (rs != CODE_OK)
-    rs = Gateway::getInstance()->PushDeviceOnlineState(this, isOnline);
-  return rs;
-}
-
-static map<uint32_t, const char *> typeToNameList;
-static map<const char *, const char *> typeToModelList;
-static map<uint32_t, uint32_t> bleTypeToGroupIdList;
-static map<uint32_t, const char *> bleGroupIntToGroupString;
-static map<uint16_t, const char *> bleAttributeIdToAttributeString;
-
-void Device::InitDeviceModelList()
-{
-  bleTypeToGroupIdList[TYPE_GROUP_SWITCH] = BLE_SWITCH_TOUCH_GROUP;
-  bleTypeToGroupIdList[BLE_DOWNLIGHT_SMT] = BLE_DOWNLIGHT_SMT_GROUP;
-  bleTypeToGroupIdList[BLE_DOWNLIGHT_RGBCW] = BLE_DOWNLIGHT_RGBCW_GROUP;
-
-  bleGroupIntToGroupString[BLE_SWITCH_TOUCH_GROUP] = "GROUP_SWITCH";
-  bleGroupIntToGroupString[BLE_DOWNLIGHT_SMT_GROUP] = "D_CCT_BLE";
-  bleGroupIntToGroupString[BLE_DOWNLIGHT_RGBCW_GROUP] = "D_CCT-RGB_BLE";
-
-#ifdef CONFIG_ENABLE_BLE
-
-  RegisterDeviceModel(HG_BLE_SWITCH_1, HG_BLE_SWITCH);
-  RegisterDeviceModel(HG_BLE_SWITCH_2, HG_BLE_SWITCH);
-  RegisterDeviceModel(HG_BLE_SWITCH_3, HG_BLE_SWITCH);
-  RegisterDeviceModel(HG_BLE_SWITCH_4, HG_BLE_SWITCH);
-
-#endif
-}
-
-void Device::RegisterDeviceModel(const char *type, const char *model)
-{
-  // typeToNameList[type] = name;
-  typeToModelList[type] = model;
-}
-
-uint32_t Device::BleTypeToGroupId(uint32_t deviceType)
-{
-  return bleTypeToGroupIdList[deviceType];
-}
-
-uint32_t Device::BleGroupIntByString(const char *groupStr)
-{
-  for (const auto &[_groupInt, _groupStr] : bleGroupIntToGroupString)
-  {
-    if (strcmp(_groupStr, groupStr) == 0)
-      return _groupInt;
-  }
-  return 0;
-}
-
-const char *Device::ConvertDeviceTypeToName(uint32_t type)
-{
-  // TODO: check null when use
-  return typeToNameList[type];
-}
-
-const char *Device::ConvertDeviceTypeToModel(uint32_t type)
-{
-  // const char *model = typeToModelList[type];
-  // if (model)
-  //   return model;
-  // else
-  return "";
-}
-
-uint32_t Device::ConvertModelToDeviceType(const char *model)
-{
-  // for (const auto &[_type, _model] : typeToModelList) {
-  //   if (strcmp(model, _model) == 0)
-  //     return _type;
-  // }
-  return DEVICE_UNKNOWN_TYPE;
+  return Gateway::getInstance()->PushDeviceOnlineState(this, isOnline);
 }
 
 bool Device::GetIsFavorite() { return this->isFavorite; }

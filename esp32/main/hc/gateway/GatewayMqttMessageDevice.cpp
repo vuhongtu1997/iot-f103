@@ -1,5 +1,4 @@
 #include "Gateway.h"
-#include "BleProtocol.h"
 #include "Device.h"
 #include "DeviceManager.h"
 #include "Log.h"
@@ -94,79 +93,8 @@ int Gateway::OnControlDeviceV3(Json::Value &reqValue, Json::Value &respValue)
 int Gateway::OnControlAllDeviceV3(Json::Value &reqValue,
                                   Json::Value &respValue)
 {
+    (void)reqValue;
     respValue["cmd"] = "controlAllDevRsp";
-    int result = CODE_ERROR;
-
-#ifdef CONFIG_ENABLE_BLE
-    if (reqValue.isObject())
-    {
-        bool requested = false;
-        bool succeeded = true;
-        const Json::Value &onoff = reqValue.isMember(KEY_ATTRIBUTE_ONOFF)
-                                           ? reqValue[KEY_ATTRIBUTE_ONOFF]
-                                           : reqValue[KEY_ATTRIBUTE_BUTTON];
-        if (!onoff.isNull() && (onoff.isInt() || onoff.isBool()))
-        {
-            requested = true;
-            int value = onoff.isBool() ? static_cast<int>(onoff.asBool())
-                                       : onoff.asInt();
-            succeeded &= BleProtocol::getInstance()->SetOnOffLight(
-                             0xFFFF, value, TRANSITION_DEFAULT, true) == CODE_OK;
-        }
-        if (reqValue.isMember(KEY_ATTRIBUTE_DIM) &&
-            reqValue[KEY_ATTRIBUTE_DIM].isInt())
-        {
-            requested = true;
-            int value = reqValue[KEY_ATTRIBUTE_DIM].asInt();
-            if (value == 0)
-            {
-                succeeded &= BleProtocol::getInstance()->SetOnOffLight(
-                                0xFFFF, 0, TRANSITION_DEFAULT, true) == CODE_OK;
-            }
-            else
-            {
-                succeeded &= value >= 0 && value <= 100 &&
-                            BleProtocol::getInstance()->SetDimmingLight(
-                                0xFFFF, value * 65535 / 100,
-                                TRANSITION_DEFAULT, true) == CODE_OK;
-            }
-        }
-        if (reqValue.isMember(KEY_ATTRIBUTE_CCT) &&
-            reqValue[KEY_ATTRIBUTE_CCT].isInt())
-        {
-            requested = true;
-            int value = reqValue[KEY_ATTRIBUTE_CCT].asInt();
-            succeeded &= value >= 0 && value <= 100 &&
-                         BleProtocol::getInstance()->SetCctLight(
-                             0xFFFF, 800 + (value * 19200 + 50) / 100,
-                             TRANSITION_DEFAULT, true) == CODE_OK;
-        }
-        if (reqValue.isMember(KEY_ATTRIBUTE_HUE) &&
-            reqValue[KEY_ATTRIBUTE_HUE].isInt() &&
-            reqValue.isMember(KEY_ATTRIBUTE_SATURATION) &&
-            reqValue[KEY_ATTRIBUTE_SATURATION].isInt() &&
-            reqValue.isMember(KEY_ATTRIBUTE_LUMINANCE) &&
-            reqValue[KEY_ATTRIBUTE_LUMINANCE].isInt())
-        {
-            requested = true;
-            succeeded &= BleProtocol::getInstance()->SetHSLLight(
-                             0xFFFF, reqValue[KEY_ATTRIBUTE_HUE].asInt(),
-                             reqValue[KEY_ATTRIBUTE_SATURATION].asInt(),
-                             reqValue[KEY_ATTRIBUTE_LUMINANCE].asInt(),
-                             TRANSITION_DEFAULT, true) == CODE_OK;
-        }
-        if (reqValue.isMember(KEY_ATTRIBUTE_MODE_RGB) &&
-            reqValue[KEY_ATTRIBUTE_MODE_RGB].isInt())
-        {
-            requested = true;
-            succeeded &= BleProtocol::getInstance()->CallModeRgb(
-                             0xFFFF,
-                             reqValue[KEY_ATTRIBUTE_MODE_RGB].asInt()) == CODE_OK;
-        }
-        result = requested && succeeded ? CODE_OK : CODE_ERROR;
-    }
-#endif
-
-    respValue["data"]["code"] = CODE_OK;
+    respValue["data"]["code"] = CODE_ERROR;
     return CODE_OK;
 }

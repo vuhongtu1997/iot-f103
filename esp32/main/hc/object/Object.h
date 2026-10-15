@@ -1,17 +1,17 @@
 /**
  * @file Object.h
- * @brief Định nghĩa lớp cơ sở `Object` dùng chung cho các đối tượng trong hệ thống (ví dụ: thiết bị, nhóm...).
+ * @brief Định nghĩa lớp cơ sở `Object` dùng chung cho các đối tượng trong hệ thống.
  *
  * @details
  * Lớp `Object` lưu trữ các thông tin cơ bản như:
  * - `id`: định danh duy nhất của đối tượng (thường là chuỗi UUID hoặc mã thiết bị).
  * - `name`: tên hiển thị của đối tượng.
- * - `addr`: địa chỉ định danh (có thể là địa chỉ mạng, địa chỉ BLE Mesh hoặc nhóm).
+ * - `addr`: địa chỉ định danh của thiết bị.
  *
  * Lớp này cung cấp các phương thức getter/setter để truy cập và thay đổi thông tin đối tượng.
  *
  * @note
- * Đây là lớp cơ sở trừu tượng, thường được kế thừa bởi các lớp khác như `Device`, `Group`, v.v.
+ * Đây là lớp cơ sở trừu tượng, được kế thừa bởi lớp `Device`.
  */
 
 #pragma once
@@ -28,7 +28,7 @@ class Object
 protected:
 	std::string id;	  ///< ID duy nhất của đối tượng
 	std::string name; ///< Tên của đối tượng
-	uint16_t addr;	  ///< Địa chỉ định danh (ví dụ: địa chỉ nhóm hoặc thiết bị)
+	uint16_t addr;	  ///< Địa chỉ định danh của thiết bị
 
 public:
 	/**

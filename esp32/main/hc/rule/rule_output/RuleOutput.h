@@ -4,7 +4,7 @@
  *
  * RuleOutput là lớp trừu tượng cơ sở cho các hành động được thực thi khi Rule được kích hoạt.
  * Các lớp dẫn xuất sẽ triển khai phương thức RunOutput để thực hiện hành động cụ thể
- * trên thiết bị, nhóm, scene hoặc gateway.
+ * trên thiết bị hoặc gateway.
  */
 
 #pragma once

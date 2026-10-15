@@ -1,22 +1,88 @@
 #include "Gateway.h"
 #include "Log.h"
 #include "Wifi.h"
-#include "Base64.h"
 #include "Config.h"
 #include "Database.h"
+#include "ModbusBus.h"
+#include "protocol.h"
 
-#include <fstream>
+#include <cstdio>
+
 #include <string.h>
-#include <sys/stat.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <dirent.h>
 
-void Gateway::InitMqttMessageHc()
+void Gateway::InitMqttMessageRs485()
 {
-	// OnDeviceRpcCallbackRegister(TYPE_OTA_HC, bind(&Gateway::OnOtaHc, this, placeholders::_1, placeholders::_2, placeholders::_3));
-	OnDeviceRpcCallbackRegister("startScanBle", bind(&Gateway::OnStartScan, this, placeholders::_1, placeholders::_2));
-	OnDeviceRpcCallbackRegister("stopScanBle", bind(&Gateway::OnStopScan, this, placeholders::_1, placeholders::_2));
+	OnDeviceRpcCallbackRegister(
+		"scan", bind(&Gateway::OnModbusDiscover, this, placeholders::_1, placeholders::_2));
+	OnDeviceRpcCallbackRegister(
+		"discover", bind(&Gateway::OnModbusDiscover, this, placeholders::_1, placeholders::_2));
+	OnDeviceRpcCallbackRegister(
+		"assign_address", bind(&Gateway::OnModbusAssignAddress, this, placeholders::_1, placeholders::_2));
+}
+
+int Gateway::OnModbusDiscover(Json::Value &, Json::Value &respValue)
+{
+	bool success = ModbusDiscoverNodes();
+	std::vector<ModbusNodeInfo> nodes;
+	ModbusGetNodes(nodes);
+	respValue["method"] = "discoverRsp";
+	respValue["params"]["code"] = success ? CODE_OK : CODE_ERROR;
+	respValue["params"]["nodes"] = Json::arrayValue;
+	for (const ModbusNodeInfo &node : nodes)
+	{
+		char uid[25];
+		for (size_t i = 0; i < sizeof(node.uid); ++i)
+			snprintf(uid + i * 2, sizeof(uid) - i * 2, "%02x", node.uid[i]);
+		Json::Value item;
+		item["address"] = node.address;
+		item["uid"] = uid;
+		item["version"] = static_cast<Json::UInt64>(node.version);
+		item["mode"] = node.mode;
+		respValue["params"]["nodes"].append(item);
+	}
+	if (!success)
+		respValue["params"]["error"] = "Modbus scan failed or registry could not be saved";
+	return CODE_OK;
+}
+
+int Gateway::OnModbusAssignAddress(Json::Value &reqValue, Json::Value &respValue)
+{
+	respValue["method"] = "assign_addressRsp";
+	respValue["params"]["code"] = CODE_FORMAT_ERROR;
+	if (!reqValue.isObject() || !reqValue.isMember("address") ||
+		!reqValue["address"].isInt() || reqValue["address"].asInt() < 1 ||
+		reqValue["address"].asInt() > MAX_NODES)
+	{
+		respValue["params"]["error"] = "address must be an integer from 1 to 247";
+		return CODE_OK;
+	}
+
+	ModbusNodeInfo assigned{};
+	int result = ModbusAssignAddress(
+		static_cast<uint8_t>(reqValue["address"].asInt()), &assigned);
+	respValue["params"]["code"] = result == 1 ? CODE_OK : CODE_ERROR;
+	respValue["params"]["result"] = result;
+	if (result == 1)
+	{
+		char uid[25];
+		for (size_t i = 0; i < sizeof(assigned.uid); ++i)
+			snprintf(uid + i * 2, sizeof(uid) - i * 2, "%02x", assigned.uid[i]);
+		respValue["params"]["address"] = assigned.address;
+		respValue["params"]["uid"] = uid;
+		respValue["params"]["version"] = static_cast<Json::UInt64>(assigned.version);
+	}
+	else
+	{
+		respValue["params"]["error"] =
+			result == -1 ? "address is already registered or occupied"
+			: result == -2 ? "bus activity made the address check uncertain"
+			: result == -4 ? "invalid address or registry is full"
+			: result == -5 ? "could not persist address reservation"
+			                : "assignment was not confirmed; run scan before retrying";
+	}
+	return CODE_OK;
 }
 
 int Gateway::OnControlHc(Json::Value &reqValue, Json::Value &respValue, string &topicRsp)
@@ -99,131 +165,6 @@ int Gateway::OnGetHcInfo(Json::Value &reqValue, Json::Value &respValue, string &
 	}
 	respValue["params"] = dataValue;
 	respValue["method"] = "getHcInfoRsp";
-	return CODE_OK;
-}
-
-int Gateway::OnStartScan(Json::Value &reqValue, Json::Value &respValue)
-{
-	int rsCode = CODE_OK;
-
-#ifdef CONFIG_ENABLE_BLE
-	BleProtocol *ble = BleProtocol::getInstance();
-	// OnServerReq passes payload.data to this callback directly.
-	const Json::Value &data = reqValue;
-	const bool hasRequestConfig = data.isObject() &&
-		(data.isMember("gw_add") || data.isMember("gatewayAddress"));
-	if (!hasRequestConfig && !ble->HasProvisionedMeshConfig())
-		ble->InitKey();
-	if (hasRequestConfig)
-	{
-		rsCode = ble->ConfigureProvisionedMesh(data);
-		if (rsCode != CODE_OK)
-		{
-			respValue["params"]["error"] = "MESH_CONFIG_INVALID";
-			respValue["params"]["message"] =
-				"Homegy Mesh configuration is invalid or could not be applied";
-		}
-	}
-	else if (!ble->HasProvisionedMeshConfig())
-	{
-		rsCode = CODE_ERROR;
-		if (GetDormitory().empty())
-		{
-			LOGE("startScanBle rejected: homeId is unavailable");
-			respValue["params"]["error"] = "HOME_ID_MISSING";
-			respValue["params"]["message"] =
-				"Set up the gateway with a homeId before creating its Homegy Mesh";
-		}
-		else if (ble->NeedsMeshRecovery())
-		{
-			LOGE("startScanBle rejected: BLE module holds a Mesh whose AppKey is not stored");
-			respValue["params"]["error"] = "MESH_RECOVERY_REQUIRED";
-			respValue["params"]["message"] =
-				"Restore the matching Homegy Mesh configuration before scanning";
-		}
-		else
-		{
-			LOGE("startScanBle rejected: Homegy mesh configuration is unavailable");
-			respValue["params"]["error"] = "MESH_CONFIG_MISSING";
-			respValue["params"]["message"] =
-				"Provide Homegy Mesh configuration in startScanBle.data before scanning";
-		}
-		respValue["params"]["requiredFields"] =
-			"networkKey, networkKeyIndex, appKey, appKeyIndex, ivIndex, gatewayAddress, gatewayDeviceKey";
-	}
-	if (rsCode == CODE_OK)
-	{
-		ble->SetProvisioning(true);
-		rsCode = ble->StartScan();
-		if (rsCode != CODE_OK)
-			ble->SetProvisioning(false);
-	}
-#endif
-
-	respValue["params"]["code"] = rsCode;
-	respValue["method"] = "startScanRsp";
-
-	return CODE_OK;
-}
-
-int Gateway::OnStopScan(Json::Value &reqValue, Json::Value &respValue)
-{
-	int rsCode = CODE_OK;
-
-#ifdef CONFIG_ENABLE_BLE
-	BleProtocol::getInstance()->SetProvisioning(false);
-	rsCode = BleProtocol::getInstance()->StopScan();
-#endif
-
-	respValue["params"]["code"] = rsCode;
-	respValue["method"] = "stopScanRsp";
-	return CODE_OK;
-}
-
-int Gateway::OnStartScanPairDev(Json::Value &reqValue, Json::Value &respValue, string &topicRsp)
-{
-	int rs = CODE_OK;
-	if (reqValue.isMember("id") && reqValue["id"].isString())
-	{
-		string devId = reqValue["id"].asString();
-		Device *device = DeviceManager::getInstance()->GetDeviceFromId(devId);
-		if (device)
-		{
-			respValue["method"] = "startScanChildDevRsp";
-			respValue["params"]["code"] = CODE_OK;
-			// DeviceRpcResponse(topicRsp, respValue.toString());
-#ifdef CONFIG_ENABLE_BLE
-			uint32_t maxAddr = DeviceManager::getInstance()->GetMaxAddrBle();
-			LOGW("max addr: %d", maxAddr + BLE_MAX_ELEMENT);
-			BleProtocol::getInstance()->AddPairDevice(device->GetAddr(), maxAddr + BLE_MAX_ELEMENT);
-#endif
-		}
-		else
-			rs = CODE_NOT_FOUND_DEVICE;
-	}
-	else
-		rs = CODE_FORMAT_ERROR;
-
-	// respValue["params"]["code"] = rs;
-	// respValue["method"] = "stopScanChildDevRsp";
-	return CODE_NOT_RESPONSE;
-}
-
-int Gateway::OnStopScanPairDev(Json::Value &reqValue, Json::Value &respValue, string &topicRsp)
-{
-	if (reqValue.isMember("id") && reqValue["id"].isString())
-	{
-		string deviceId = reqValue["id"].asString();
-		Device *device = DeviceManager::getInstance()->GetDeviceFromId(deviceId);
-		if (device)
-		{
-#ifdef CONFIG_ENABLE_BLE
-			BleProtocol::getInstance()->ScanStopSeftPowerRemote(device->GetAddr(), 0);
-#endif
-		}
-	}
-	respValue["params"]["code"] = CODE_OK;
-	respValue["method"] = "stopScanChildDevRsp";
 	return CODE_OK;
 }
 

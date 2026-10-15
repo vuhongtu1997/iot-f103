@@ -93,15 +93,7 @@ int Database::DeviceDelAll()
 
 int Database::DelDevExist(Device *device)
 {
-	string sql = "DELETE FROM DeviceInGroup WHERE device_id = '" + device->GetId() + "';";
-	Sqlite_Exec(sql);
-	sql = "DELETE FROM DeviceInRoom WHERE device_id = '" + device->GetId() + "';";
-	Sqlite_Exec(sql);
-	sql = "DELETE FROM DeviceInScene WHERE device_id = '" + device->GetId() + "';";
-	Sqlite_Exec(sql);
-	sql = "DELETE FROM DeviceAttribute WHERE device_id = '" + device->GetId() + "';";
-	Sqlite_Exec(sql);
-	sql = "DELETE FROM DeviceBleChild WHERE device_id = '" + device->GetId() + "';";
+	string sql = "DELETE FROM DeviceAttribute WHERE device_id = '" + device->GetId() + "';";
 	Sqlite_Exec(sql);
 	return CODE_OK;
 }

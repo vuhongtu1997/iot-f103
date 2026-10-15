@@ -4,7 +4,7 @@
  *
  * Lớp này sử dụng mẫu Singleton để đảm bảo chỉ có một đối tượng quản lý duy nhất,
  * chịu trách nhiệm thêm, xóa, truy xuất và duyệt qua các thiết bị (Device).
- * Nếu cấu hình `CONFIG_ENABLE_BLE` được bật, lớp cũng hỗ trợ quản lý các thiết bị BLE.
+ * DeviceManager owns the protocol-specific Device objects, including Modbus nodes.
  */
 
 #pragma once
@@ -12,10 +12,7 @@
 #include <map>
 #include <mutex>
 #include "Device.h"
-
-#ifdef CONFIG_ENABLE_BLE
-#include "DeviceBle.h"
-#endif
+#include "DeviceModbus.h"
 
 /**
  * @class DeviceManager
@@ -26,7 +23,7 @@
  * - Xóa thiết bị
  * - Lấy thiết bị theo ID hoặc MAC
  * - Duyệt qua danh sách thiết bị
- * - (Nếu bật BLE) Lấy thiết bị BLE theo địa chỉ, và quản lý địa chỉ BLE.
+ * - Lấy danh sách các node Modbus.
  *
  * Thiết kế theo mẫu Singleton — chỉ có một thể hiện duy nhất trong chương trình.
  */
@@ -94,36 +91,7 @@ public:
    */
   Device *GetDeviceFromMac(std::string mac);
 
-#ifdef CONFIG_ENABLE_BLE
-  /**
-   * @brief Lấy thiết bị BLE theo địa chỉ.
-   *
-   * @param addr Địa chỉ BLE của thiết bị.
-   * @return Con trỏ đến `DeviceBle` nếu tìm thấy, NULL nếu không.
-   */
-  DeviceBle *GetDeviceBleFromAddr(uint16_t addr);
-
-  /**
-   * @brief Lấy địa chỉ BLE kế tiếp dùng cho thiết bị được Android Provision.
-   *
-   * @return Địa chỉ BLE mới có thể sử dụng.
-   */
-  uint32_t GetNextAddrBleAndroidProvision();
-
-  /**
-   * @brief Lấy địa chỉ BLE lớn nhất hiện đang được sử dụng.
-   *
-   * @return Địa chỉ BLE lớn nhất.
-   */
-  uint32_t GetMaxAddrBle();
-
-  /**
-   * @brief Lấy danh sách tất cả thiết bị BLE hiện có.
-   *
-   * @return Vector chứa con trỏ đến các đối tượng `Device`.
-   */
-  vector<Device *> GetListDeviceBle();
-#endif
+  vector<DeviceModbus *> GetListDeviceModbus();
 
   /**
    * @brief Xóa một thiết bị khỏi danh sách.

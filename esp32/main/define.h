@@ -25,7 +25,11 @@
 #endif
 
 #ifndef BTN
+#if CONFIG_IDF_TARGET_ESP32C3
+#define BTN GPIO_NUM_9
+#else
 #define BTN GPIO_NUM_35
+#endif
 #endif
 
 #ifndef ETH_MDC_GPIO
@@ -50,19 +54,31 @@
 #endif
 
 #ifndef CONFIG_SDA_GPIO
+#if CONFIG_IDF_TARGET_ESP32C3
+#define CONFIG_SDA_GPIO GPIO_NUM_8
+#else
 #define CONFIG_SDA_GPIO GPIO_NUM_33
+#endif
 #endif
 
 #ifndef CONFIG_SCL_GPIO
+#if CONFIG_IDF_TARGET_ESP32C3
+#define CONFIG_SCL_GPIO GPIO_NUM_10
+#else
 #define CONFIG_SCL_GPIO GPIO_NUM_32
 #endif
-
-#ifndef UART_TX_PIN
-#define UART_TX_PIN GPIO_NUM_14
 #endif
 
-#ifndef UART_RX_PIN
-#define UART_RX_PIN GPIO_NUM_12
+#ifndef RS485_TX_PIN
+#define RS485_TX_PIN GPIO_NUM_4
+#endif
+
+#ifndef RS485_RX_PIN
+#define RS485_RX_PIN GPIO_NUM_5
+#endif
+
+#ifndef RS485_DE_PIN
+#define RS485_DE_PIN GPIO_NUM_6
 #endif
 
 #ifndef ETH_POWER_PIN
