@@ -107,9 +107,9 @@ namespace Util
 	int ConvertStrTimeToInt(std::string time);
 
 	/**
-	 * @brief Kiểm tra thiết bị có module RTC hoạt động hay không.
+	 * @brief Kiểm tra hệ thống đã đồng bộ thời gian qua SNTP hay chưa.
 	 */
-	bool HaveRTC();
+	bool HaveTime();
 
 	/**
 	 * @brief Chuyển dữ liệu nhị phân sang chuỗi hex.

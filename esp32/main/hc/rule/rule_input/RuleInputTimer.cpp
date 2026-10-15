@@ -26,9 +26,9 @@ RuleInputTimer::~RuleInputTimer()
 
 bool RuleInputTimer::Check()
 {
-	if (!Util::HaveRTC())
+	if (!Util::HaveTime())
 	{
-		LOGW("Not have RTC");
+		LOGW("System time has not been synchronized");
 		return false;
 	}
 	int currentWeekDay = Util::GetCurrentWeekDay();

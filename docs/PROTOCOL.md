@@ -14,11 +14,13 @@ Gateway checks ID against its SQLite `Device` registry and probes for a live occ
 
 In this ESP32-C3 gateway app, MQTT requests use the existing gateway RPC contract on `/v3/server/hc/{mac}/jsonreq`, with `cmd`, `rqi`, and object-valued `data`. Use `cmd: "scan"` or `"discover"` with empty data for read-only discovery, and `cmd: "assign_address"` with `data: {"address": 5}` to assign. Responses use `discoverRsp` or `assign_addressRsp` on `/v3/hc/{mac}/server/jsonres`. `assign_addressRsp.params.code` is `0` only after the new address and UID have been read back and persisted; `params.result` contains the bus-level result. Unlike the standalone gateway in the `main` branch, this app does not use `iot/{gateway}/commands` or the `job_id` deduplication API.
 
-The gateway scans once after startup, then polls registered nodes every five seconds. Telemetry is published through the existing `deviceUpdate` MQTT command using device ID `rs485-{uid}` (or `rs485-pending-{address}` for an unconfirmed reservation) and the data fields `address`, `uid`, `version`, `mode`, `stt`, `quality`, `adc_raw`, and `millivolts`. Version and mode are read from the current FC03 response. MQTT-disconnected samples are not buffered; the next poll reports the latest node state after reconnection. Remote STM32 OTA is not wired into this gateway RPC integration.
+After assignment and during discovery, the gateway reads FC03 register 12 to identify the node's sensor family. A recognized family creates a child device in SQLite with ID `rs485-{uid}-{gas|temperature-humidity|ch3}` and type `MODBUS_GAS`, `MODBUS_TEMPERATURE_HUMIDITY`, or `MODBUS_CH3`. The `assign_addressRsp` includes `sensor_type`, `sensor_type_name`, and `child_device` when recognized. Discovery includes the same type and child ID. Unknown or legacy nodes still register as `MODBUS_NODE` without a child.
 
-`scan` and `discover` only read assigned IDs; neither grants new addresses. No prefix discovery or special address-247 multicast is implemented. To set a configured node again, clear its two configuration pages locally; no remote reset command is implemented.
+The gateway scans once after startup, then polls registered nodes every five seconds. Telemetry is published through the existing `deviceUpdate` MQTT command for the parent ID `rs485-{uid}` (or `rs485-pending-{address}` for an unconfirmed reservation) and, when recognized, its sensor child. Parent data includes `address`, `uid`, `version`, `mode`, `sensor_type`, `sensor_type_name`, `stt`, `quality`, `adc_raw`, and `millivolts`. Gas and CH3 child samples include `raw` and `millivolts`; temperature/humidity children currently report identification and online state only (`quality: "measurement_unavailable"`), because this STM32 firmware has no temperature/humidity sensor driver. MQTT-disconnected samples are not buffered; the next poll reports the latest node state after reconnection. Remote STM32 OTA is not wired into this gateway RPC integration.
 
-On ESP32-C3 the gateway uses UART1 at 38400 8N1 with TX=GPIO4, RX=GPIO5, and DE/RE=GPIO6. These GPIOs are shared with external JTAG on common C3 modules. This app build disables the old BLE device protocol and UDP discovery/provisioning service. Wi-Fi credentials therefore need to be provisioned before boot using a mechanism outside this firmware.
+`scan` and `discover` only read assigned IDs; neither grants new addresses. No prefix discovery or special address-247 multicast is implemented. To return a configured node to its initial unconfigured state, hold its PB12-to-GND factory-reset button for at least 5 seconds. The node invalidates and erases both address configuration pages, then restarts with address 0. Firmware, OTA key, and compile-time sensor type are retained. No remote reset command is implemented.
+
+On ESP32-C3 the gateway uses UART1 at 38400 8N1 with TX=GPIO4, RX=GPIO5, and DE/RE=GPIO6. These GPIOs are shared with external JTAG on common C3 modules. This app build disables the old BLE device protocol, UDP discovery/provisioning service, Ethernet, and external DS1307 RTC. Wi-Fi is the only network transport and SNTP is the only time source. Wi-Fi credentials therefore need to be provisioned before boot using a mechanism outside this firmware.
 
 ## FC03 registers (zero-based offsets)
 
@@ -30,8 +32,11 @@ On ESP32-C3 the gateway uses UART1 at 38400 8N1 with TX=GPIO4, RX=GPIO5, and DE/
 | 4 | 0=application, 1=recovery bootloader |
 | 5 | Current address |
 | 6..11 | UID bytes, two bytes per register, first byte high |
+| 12 | Sensor family: 0 unknown, 1 gas, 2 temperature/humidity, 3 CH3 |
 
-Read request start[2] and count[2] BE; count >0, start+count <=12. Response byte_count[1], registers[2*count]. Error function |=0x80, exception 02 for out-of-range. FC06 register 0x0100 is write-only and accepted only as commissioning broadcast on an unconfigured node. It is outside this FC03 readable range.
+Read request start[2] and count[2] BE; count >0, start+count <=13. Response byte_count[1], registers[2*count]. Error function |=0x80, exception 02 for out-of-range. FC06 register 0x0100 is write-only and accepted only as commissioning broadcast on an unconfigured node. It is outside this FC03 readable range. Older node firmware may expose only registers 0–11; the gateway treats the optional sensor type read as unknown and continues to support the node.
+
+STM32 builds select the reported sensor family with `make SENSOR_TYPE=1` (gas), `2` (temperature/humidity), or `3` (CH3). The default is 0 (unknown). The type is a firmware configuration for a node variant; it is not inferred from the analog sample. Gas and CH3 currently share the node's ADC raw/millivolt measurements. Temperature/humidity register values are not defined until a corresponding STM32 sensor driver is added.
 
 ## OTA: assigned address, function 0x42
 

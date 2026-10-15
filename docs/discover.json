@@ -1,1 +1,1 @@
-{"op":"scan","job_id":"scan-001"}
+{"cmd":"discover","rqi":"discover-001","data":{}}

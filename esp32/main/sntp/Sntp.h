@@ -20,6 +20,5 @@ namespace Sntp
 	 * @brief Check trạng thái đồng bộ
 	 */
 	bool haveNtpTime(void);
-	bool haveRtcTime(void);
 	bool haveTime(void);
 }

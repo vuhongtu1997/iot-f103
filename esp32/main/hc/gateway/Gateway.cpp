@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "Database.h"
 #include "DeviceManager.h"
+#include "protocol.h"
 #include "Log.h"
 #include "Util.h"
 #include "Wifi.h"
@@ -251,10 +252,14 @@ int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
     deviceId = uid;
   else
     deviceId = "pending-" + std::to_string(node.address);
-  device["id"] = string("rs485-") + deviceId;
+  const string parentId = string("rs485-") + deviceId;
+  device["id"] = parentId;
   device["data"]["address"] = node.address;
   device["data"]["uid"] = uid;
   device["data"]["stt"] = online ? 1 : 0;
+  device["data"]["sensor_type"] = node.sensorType;
+  device["data"]["sensor_type_name"] =
+      DeviceModbus::GetSensorName(node.sensorType);
   if (online)
   {
     device["data"]["version"] = static_cast<Json::UInt64>(
@@ -262,9 +267,9 @@ int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
     device["data"]["mode"] = registers[4];
     device["data"]["adc_raw"] = registers[0];
     device["data"]["millivolts"] = registers[1];
-    device["data"]["quality"] = registers[4] ? "bootloader"
-                                  : registers[0] == 0xffff ? "sensor_error"
-                                                           : "ok";
+    device["data"]["quality"] = registers[4]             ? "bootloader"
+                                : registers[0] == 0xffff ? "sensor_error"
+                                                         : "ok";
   }
   else
   {
@@ -276,5 +281,40 @@ int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
   Json::Value update;
   update["device"] = Json::arrayValue;
   update["device"].append(device);
+  const char *sensorDeviceType =
+      DeviceModbus::GetSensorDeviceType(node.sensorType);
+  if (sensorDeviceType && hasUid)
+  {
+    Json::Value child;
+    child["id"] =
+        DeviceModbus::GetSensorDeviceId(parentId, node.sensorType);
+    child["data"]["parent_id"] = parentId;
+    child["data"]["address"] = node.address;
+    child["data"]["uid"] = uid;
+    child["data"]["type"] = sensorDeviceType;
+    child["data"]["sensor_type"] = node.sensorType;
+    child["data"]["sensor_type_name"] =
+        DeviceModbus::GetSensorName(node.sensorType);
+    child["data"]["stt"] = online ? 1 : 0;
+    if (online)
+    {
+      child["data"]["quality"] =
+          node.sensorType == MODBUS_SENSOR_TEMPERATURE_HUMIDITY
+              ? "measurement_unavailable"
+          : registers[0] == 0xffff ? "sensor_error"
+                                   : "ok";
+      if (node.sensorType == MODBUS_SENSOR_GAS ||
+          node.sensorType == MODBUS_SENSOR_CH3)
+      {
+        child["data"]["raw"] = registers[0];
+        child["data"]["millivolts"] = registers[1];
+      }
+    }
+    else
+    {
+      child["data"]["quality"] = "offline";
+    }
+    update["device"].append(child);
+  }
   return PushDeviceUpdateCloud(update);
 }

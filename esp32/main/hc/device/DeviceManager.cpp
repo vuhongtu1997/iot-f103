@@ -1,6 +1,9 @@
 #include "DeviceManager.h"
 
 #include "DeviceModbus.h"
+#include "DeviceModbusGas.h"
+#include "DeviceModbusTemperatureHumidity.h"
+#include "DeviceModbusCH3.h"
 #include "Log.h"
 
 #include <algorithm>
@@ -9,42 +12,54 @@
 
 namespace
 {
-std::mutex deviceListMutex;
+  std::mutex deviceListMutex;
 
-void NormalizeLower(std::string &value)
-{
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char ch)
-                 { return static_cast<char>(std::tolower(ch)); });
-}
-
-Device *CreateDevice(std::string &id, std::string &mac, std::string &type,
-                     std::string &name, uint16_t address, uint16_t version,
-                     Json::Value *dataJson)
-{
-  if (type != DeviceModbus::TYPE)
-    return nullptr;
-
-  std::string uid = mac;
-  uint32_t firmwareVersion = version;
-  uint8_t mode = 0;
-  if (dataJson && dataJson->isObject())
+  void NormalizeLower(std::string &value)
   {
-    if ((*dataJson)["uid"].isString() &&
-        !(*dataJson)["uid"].asString().empty())
-      uid = (*dataJson)["uid"].asString();
-    if ((*dataJson)["version"].isUInt64())
-      firmwareVersion =
-          static_cast<uint32_t>((*dataJson)["version"].asUInt64());
-    else if ((*dataJson)["version"].isUInt())
-      firmwareVersion = (*dataJson)["version"].asUInt();
-    if ((*dataJson)["mode"].isUInt())
-      mode = static_cast<uint8_t>((*dataJson)["mode"].asUInt());
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch)
+                   { return static_cast<char>(std::tolower(ch)); });
   }
 
-  return new DeviceModbus(id, name, uid, address, firmwareVersion, mode,
-                          dataJson);
-}
+  Device *CreateDevice(std::string &id, std::string &mac, std::string &type,
+                       std::string &name, uint16_t address, uint16_t version,
+                       Json::Value *dataJson)
+  {
+    std::string uid = mac;
+    uint32_t firmwareVersion = version;
+    uint8_t mode = 0;
+    uint8_t sensorType = 0;
+    if (dataJson && dataJson->isObject())
+    {
+      if ((*dataJson)["uid"].isString() &&
+          !(*dataJson)["uid"].asString().empty())
+        uid = (*dataJson)["uid"].asString();
+      if ((*dataJson)["version"].isUInt64())
+        firmwareVersion =
+            static_cast<uint32_t>((*dataJson)["version"].asUInt64());
+      else if ((*dataJson)["version"].isUInt())
+        firmwareVersion = (*dataJson)["version"].asUInt();
+      if ((*dataJson)["mode"].isUInt())
+        mode = static_cast<uint8_t>((*dataJson)["mode"].asUInt());
+      if ((*dataJson)["sensor_type"].isUInt())
+        sensorType =
+            static_cast<uint8_t>((*dataJson)["sensor_type"].asUInt());
+    }
+
+    if (type == DeviceModbus::TYPE)
+      return new DeviceModbus(id, name, uid, address, firmwareVersion, mode,
+                              sensorType, dataJson);
+    if (type == DeviceModbus::GAS_TYPE)
+      return new DeviceModbusGas(id, name, uid, address, firmwareVersion,
+                                 sensorType, dataJson);
+    if (type == DeviceModbus::TEMPERATURE_HUMIDITY_TYPE)
+      return new DeviceModbusTemperatureHumidity(
+          id, name, uid, address, firmwareVersion, sensorType, dataJson);
+    if (type == DeviceModbus::CH3_TYPE)
+      return new DeviceModbusCH3(id, name, uid, address, firmwareVersion,
+                                 sensorType, dataJson);
+    return nullptr;
+  }
 } // namespace
 
 DeviceManager *DeviceManager::getInstance()
@@ -190,10 +205,28 @@ vector<DeviceModbus *> DeviceManager::GetListDeviceModbus()
   {
     if (device->GetProtocol() == MODBUS_DEVICE)
     {
-      nodes.push_back(static_cast<DeviceModbus *>(device));
+      auto *modbusDevice = static_cast<DeviceModbus *>(device);
+      if (modbusDevice->IsNode())
+        nodes.push_back(modbusDevice);
     }
   }
   return nodes;
+}
+
+vector<DeviceModbus *> DeviceManager::GetListDeviceModbusSensors()
+{
+  vector<DeviceModbus *> sensors;
+  std::lock_guard<std::mutex> lock(deviceListMutex);
+  for (const auto &[id, device] : deviceList)
+  {
+    if (device->GetProtocol() == MODBUS_DEVICE)
+    {
+      auto *modbusDevice = static_cast<DeviceModbus *>(device);
+      if (!modbusDevice->IsNode())
+        sensors.push_back(modbusDevice);
+    }
+  }
+  return sensors;
 }
 
 void DeviceManager::DelDevice(Device *device)

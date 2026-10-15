@@ -11,32 +11,15 @@
 #include "esp_attr.h"
 #include "esp_sleep.h"
 #include "esp_sntp.h"
-#include "Ds1307.h"
 #include "Log.h"
 
 #define SNTP_WAIT_UPDATE_TIME 5
-#define RTC_SAVE_INTERVAL_MS (60 * 60 * 1000)
 
 static bool _have_ntp_time = false;
-static bool _rtc_saved_first_time = false;
-static bool _rtc_save_task_started = false;
 
 bool have_ntp_time(void)
 {
 	return _have_ntp_time;
-}
-
-static void rtc_save_task(void *arg)
-{
-	while (true)
-	{
-		vTaskDelay(pdMS_TO_TICKS(RTC_SAVE_INTERVAL_MS));
-
-		if (_have_ntp_time)
-		{
-			ds1307_write_system_time();
-		}
-	}
 }
 
 void time_sync_notification_cb(struct timeval *tv)
@@ -47,11 +30,6 @@ void time_sync_notification_cb(struct timeval *tv)
 
 	LOGI("Notification of a time synchronization event");
 	_have_ntp_time = true;
-
-	if (!_rtc_saved_first_time)
-	{
-		_rtc_saved_first_time = ds1307_write_system_time();
-	}
 }
 
 void initialize_sntp(bool wait_network)
@@ -60,9 +38,6 @@ void initialize_sntp(bool wait_network)
 
 	setenv("TZ", "CST-7", 1);
 	tzset();
-
-	ds1307_init();
-	ds1307_read_system_time();
 
 	if (!wait_network)
 	{
@@ -79,12 +54,6 @@ void initialize_sntp(bool wait_network)
 #endif
 
 	sntp_init();
-
-	if (!_rtc_save_task_started)
-	{
-		xTaskCreate(rtc_save_task, "rtc_save_task", 4096, NULL, 5, NULL);
-		_rtc_save_task_started = true;
-	}
 
 	while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < SNTP_WAIT_UPDATE_TIME)
 	{

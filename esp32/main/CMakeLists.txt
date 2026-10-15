@@ -52,10 +52,6 @@ endif()
 
 list(FILTER srcs EXCLUDE REGEX "/(GatewayUdpMessage|Udp)\\.cpp$")
 
-if(CONFIG_IDF_TARGET_ESP32C3)
-	list(FILTER srcs EXCLUDE REGEX "/wifi/Ethernet\\.cpp$")
-endif()
-
 set(incs
 	"hc"
 	"hc/database"

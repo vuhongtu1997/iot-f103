@@ -85,7 +85,7 @@ void Rule::Check()
 			LOGD("start: %d", startTime);
 			LOGD("end: %d", endTime);
 			if ((startTime < 0) ||																						// fullDay
-				(Util::HaveRTC() && ((startTime <= currentTimer && currentTimer <= endTime) ||							// bắt đầu và kết thúc trong cùng 1 ngày
+				(Util::HaveTime() && ((startTime <= currentTimer && currentTimer <= endTime) ||							// bắt đầu và kết thúc trong cùng 1 ngày
 									 (endTime < startTime && (startTime <= currentTimer || currentTimer <= endTime))))) // bắt đầu và kết thúc trong 2 ngày khác nhau
 			{
 				LOGD("Check time OK");

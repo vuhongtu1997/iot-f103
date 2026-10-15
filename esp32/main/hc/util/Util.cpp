@@ -138,7 +138,7 @@ int Util::ConvertStrTimeToInt(string time)
   return CODE_ERROR;
 }
 
-bool Util::HaveRTC()
+bool Util::HaveTime()
 {
 #if 1 // SNTP feature disabled
 #ifdef ESP_PLATFORM

@@ -8,6 +8,7 @@ struct ModbusNodeInfo
   uint8_t uid[12];
   uint8_t address;
   uint8_t mode;
+  uint8_t sensorType;
   uint32_t version;
 };
 

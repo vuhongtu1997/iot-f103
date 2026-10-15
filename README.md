@@ -1,6 +1,6 @@
 # ESP32-C3 MQTT gateway with RS485 Modbus RTU
 
-This ESP-IDF application keeps the existing gateway/cloud MQTT protocol and adds a Modbus RTU master for STM32 nodes over RS485. The ESP32 target is **ESP32-C3**. BLE device communication and UDP discovery/provisioning are not included in this build. Wi-Fi remains the network transport for MQTT; Wi-Fi credentials must already be available in NVS.
+This ESP-IDF application keeps the existing gateway/cloud MQTT protocol and adds a Modbus RTU master for STM32 nodes over RS485. The ESP32 target is **ESP32-C3**. BLE device communication, UDP discovery/provisioning, Ethernet, and an external RTC are not included in this build. Wi-Fi is the only network transport, and SNTP over Wi-Fi is the only time source. Wi-Fi credentials must already be available in NVS.
 
 ## Features
 
@@ -8,33 +8,96 @@ This ESP-IDF application keeps the existing gateway/cloud MQTT protocol and adds
 - Scans Modbus addresses 1–247 at startup and polls registered nodes every five seconds.
 - Accepts MQTT RPC commands `scan`, `discover` and `assign_address`.
 - Persists an address reservation before the single broadcast FC06 assignment, then stores the UID after read-back confirmation.
-- Publishes node status and FC03 register data using the gateway's existing `deviceUpdate` MQTT command.
-- Reports ADC raw values and millivolts; these are not a temperature/humidity driver.
+- Reads the node's FC03 sensor type after address assignment and persists a typed sensor child (gas, temperature/humidity, or CH3) alongside its Modbus node in SQLite.
+- Publishes the node and recognized child status through the gateway's existing `deviceUpdate` MQTT command.
+- Reports ADC raw values and millivolts for gas/CH3 nodes. Temperature/humidity is identified, but needs a matching sensor driver before measured values can be reported.
 
 The gateway does **not** use the standalone `main` branch's `iot/{gateway}/commands` topics, `job_id` command format, queueing, or remote STM32 OTA integration. See [docs/PROTOCOL.md](./docs/PROTOCOL.md) for the current MQTT RPC and Modbus details.
 
 ## Hardware
 
-Use a 3.3 V RS485 transceiver (for example, MAX3485); do not connect a 5 V receiver output directly to the ESP32-C3. Connect DE and /RE together.
+Use one 3.3 V RS485 transceiver (for example, MAX3485) at each processor. Do not connect the ESP32 and STM32 UART pins directly, and do not connect a 5 V receiver output to either processor. On both transceivers, connect `DE` and `/RE` together for half-duplex direction control.
 
-| ESP32-C3 | RS485 transceiver |
-|---|---|
-| GPIO4 | DI |
-| GPIO5 | RO |
-| GPIO6 | DE + /RE |
-| 3V3, GND | VCC, GND |
+### ESP32-C3 to RS485 transceiver
 
-The default ESP32-C3 button pin is GPIO9 and the RTC I2C pins are GPIO8 (SDA) and GPIO10 (SCL). Verify all GPIO assignments against the exact board schematic. In particular, GPIO4/5/6 may conflict with external JTAG on some modules.
+| ESP32-C3 | Transceiver pin | Function |
+|---|---|---|
+| GPIO4 (UART1 TX) | DI | Data sent by the ESP32 |
+| GPIO5 (UART1 RX) | RO | Data received by the ESP32 |
+| GPIO6 | DE + /RE | Transmit/receive direction |
+| 3V3 | VCC | 3.3 V supply |
+| GND | GND | Common reference |
 
-Use a single RS485 trunk with short stubs, connect A-to-A/B-to-B as specified by the transceiver vendor, and provide a suitable common reference. Fit 120 Ω termination only at the two physical ends and use biasing at one location. For long or electrically noisy installations, add suitable isolation and surge protection.
+### STM32F103C8T6 to RS485 transceiver
+
+| STM32F103C8T6 | Transceiver pin | Function |
+|---|---|---|
+| PA9 (USART1 TX) | DI | Data sent by the STM32 |
+| PA10 (USART1 RX) | RO | Data received by the STM32 |
+| PA8 | DE + /RE | Transmit/receive direction |
+| 3.3V | VCC | 3.3 V supply |
+| GND | GND | Common reference |
+
+### RS485 bus between ESP32 and STM32
+
+```text
+ESP32-C3                 MAX3485 #1        RS485 bus        MAX3485 #2                 STM32F103
+GPIO4  (TX) ------------ DI                                      DI ---------------- PA9  (TX)
+GPIO5  (RX) <----------- RO                                      RO ---------------> PA10 (RX)
+GPIO6       ------------ DE + /RE                        DE + /RE ------------------- PA8
+3V3         ------------ VCC                                     VCC ---------------- 3.3V
+GND         ------------ GND -------- GND/common reference ------ GND ---------------- GND
+                                      A -------------------------- A
+                                      B -------------------------- B
+```
+
+Connect `A` to `A`, `B` to `B`, and connect the grounds/common reference. Some transceiver modules label the differential pair in reverse; if there is no communication, check the module datasheet before swapping A and B. For multiple STM32 nodes, connect every node in parallel on the same A/B trunk and give each node a unique Modbus address.
+
+### STM32 factory-reset button
+
+Connect a normally-open push button between `PB12` and `GND`. The firmware configures PB12 with its internal pull-up resistor, so no external pull-up is required.
+
+```text
+STM32 PB12 ---- push button ---- GND
+```
+
+Hold the button continuously for at least 5 seconds. The STM32 erases its saved Modbus address and restarts as an unconfigured node with address `0`. A short press has no effect. This reset does not erase the bootloader, application firmware, OTA key, or the compile-time `SENSOR_TYPE`. After reset, power only this unconfigured node while assigning it a new address.
+
+### ESP32-C3 configuration button
+
+Connect a normally-open push button between `GPIO9` and `GND`. The input is active-low and the firmware enables its internal pull-up resistor.
+
+```text
+ESP32-C3 GPIO9 ---- push button ---- GND
+```
+
+- Press and release 5 times within 10 seconds to perform a factory reset. The gateway flashes its status LEDs, clears the saved network configuration and local database, then restarts.
+- If fewer than 5 clicks are completed in 10 seconds, the sequence is cancelled and both status LEDs blink twice.
+
+GPIO9 is a strapping pin on ESP32-C3. Do not hold the button while applying power or resetting the module unless bootloader/download mode is intended. Verify the strapping requirements for the exact ESP32-C3 board.
+
+The ESP32 build does not use an external RTC or Ethernet PHY. GPIO8/GPIO10 are no longer reserved for DS1307 I2C, and Ethernet MDC/MDIO/reset/clock pins are no longer configured. Time-dependent rules become available only after SNTP synchronization over Wi-Fi.
+
+Verify all GPIO assignments against the exact board schematic. In particular, GPIO4/5/6 may conflict with external JTAG on some modules.
+
+Use a single RS485 trunk with short stubs. Fit 120 Ω termination only at the two physical ends and use biasing at one location. Do not fit a 120 Ω resistor at every STM32 node. For long or electrically noisy installations, add suitable isolation and surge protection.
 
 The bus uses **38400 baud, 8N1**. The STM32 node firmware must implement the register map and broadcast address assignment documented in [docs/PROTOCOL.md](./docs/PROTOCOL.md).
+
+Build each STM32 node image for its sensor family by setting `SENSOR_TYPE`: `1` for gas, `2` for temperature/humidity, or `3` for CH3. The default `0` reports an unknown type and does not create a sensor child:
+
+```sh
+make clean
+make SENSOR_TYPE=1
+```
+
+The generated sensor type is returned in FC03 register 12. The ESP32 remains compatible with older nodes that expose only registers 0–11; those nodes are detected as unknown.
 
 ## Wi-Fi and MQTT configuration
 
 The firmware starts in station mode and reads Wi-Fi/MQTT settings from the existing NVS-backed `Config` service. BLE and UDP provisioning have been removed from this target; configure credentials through an external provisioning process before boot. The factory-reset button sequence clears saved network configuration, so credentials must be provisioned again afterward.
 
-Relevant existing NVS settings include `wifi_ssid`, `wifi_pass`, `host`, `port`, `client_id`, `username`, `password`, and `keep_alive`. The MQTT request/response topics are derived from the gateway MAC and follow the existing `/v3/server/hc/{mac}/jsonreq` and `/v3/hc/{mac}/server/jsonres` contract.
+Relevant existing NVS settings include `wifi_ssid`, `wifi_pass`, `host`, `port`, `client_id`, `username`, `password`, and `keep_alive`. The MQTT request/response topics are derived from the gateway MAC and follow the existing `/v3/server/hc/{mac}/jsonreq` and `/v3/hc/{mac}/server/jsonres` contract. Complete JSON request, response, error, and telemetry examples are documented in [docs/MQTT.md](./docs/MQTT.md).
 
 ## Build and flash
 

@@ -40,6 +40,19 @@ int Gateway::OnModbusDiscover(Json::Value &, Json::Value &respValue)
 		item["uid"] = uid;
 		item["version"] = static_cast<Json::UInt64>(node.version);
 		item["mode"] = node.mode;
+		item["sensor_type"] = node.sensorType;
+		item["sensor_type_name"] = DeviceModbus::GetSensorName(node.sensorType);
+		const char *sensorDeviceType =
+			DeviceModbus::GetSensorDeviceType(node.sensorType);
+		if (sensorDeviceType)
+		{
+			const std::string parentId = std::string("rs485-") + uid;
+			item["child_device"]["id"] =
+				DeviceModbus::GetSensorDeviceId(parentId, node.sensorType);
+			item["child_device"]["type"] = sensorDeviceType;
+			item["child_device"]["name"] =
+				DeviceModbus::GetSensorName(node.sensorType);
+		}
 		respValue["params"]["nodes"].append(item);
 	}
 	if (!success)
@@ -72,15 +85,27 @@ int Gateway::OnModbusAssignAddress(Json::Value &reqValue, Json::Value &respValue
 		respValue["params"]["address"] = assigned.address;
 		respValue["params"]["uid"] = uid;
 		respValue["params"]["version"] = static_cast<Json::UInt64>(assigned.version);
+		respValue["params"]["sensor_type"] = assigned.sensorType;
+		respValue["params"]["sensor_type_name"] =
+			DeviceModbus::GetSensorName(assigned.sensorType);
+		const char *sensorDeviceType =
+			DeviceModbus::GetSensorDeviceType(assigned.sensorType);
+		if (sensorDeviceType)
+		{
+			const std::string parentId = std::string("rs485-") + uid;
+			respValue["params"]["child_device"]["id"] =
+				DeviceModbus::GetSensorDeviceId(parentId, assigned.sensorType);
+			respValue["params"]["child_device"]["type"] = sensorDeviceType;
+		}
 	}
 	else
 	{
 		respValue["params"]["error"] =
-			result == -1 ? "address is already registered or occupied"
+			result == -1   ? "address is already registered or occupied"
 			: result == -2 ? "bus activity made the address check uncertain"
 			: result == -4 ? "invalid address or registry is full"
 			: result == -5 ? "could not persist address reservation"
-			                : "assignment was not confirmed; run scan before retrying";
+						   : "assignment was not confirmed; run scan before retrying";
 	}
 	return CODE_OK;
 }

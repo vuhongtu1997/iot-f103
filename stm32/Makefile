@@ -1,9 +1,10 @@
 PREFIX ?= arm-none-eabi-
 VERSION ?= 1
+SENSOR_TYPE ?= 0
 CC := $(PREFIX)gcc
 OBJCOPY := $(PREFIX)objcopy
 SIZE := $(PREFIX)size
-CFLAGS = -mcpu=cortex-m3 -mthumb -Os -std=gnu11 -Wall -Wextra -Wno-misleading-indentation -ffunction-sections -fdata-sections -fno-common -DFW_VERSION=$(VERSION) -Iinclude -I../common
+CFLAGS = -mcpu=cortex-m3 -mthumb -Os -std=gnu11 -Wall -Wextra -Wno-misleading-indentation -ffunction-sections -fdata-sections -fno-common -DFW_VERSION=$(VERSION) -DNODE_SENSOR_TYPE=$(SENSOR_TYPE) -Iinclude -I../common
 SRC = src/startup.c src/main.c src/board.c src/config.c src/stage.c src/node.c ../common/protocol.c ../common/sha256.c
 DEPS = $(wildcard include/*.h ../common/*.h ld/*.ld)
 LDFLAGS = -nostartfiles --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections

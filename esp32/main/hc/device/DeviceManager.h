@@ -92,6 +92,7 @@ public:
   Device *GetDeviceFromMac(std::string mac);
 
   vector<DeviceModbus *> GetListDeviceModbus();
+  vector<DeviceModbus *> GetListDeviceModbusSensors();
 
   /**
    * @brief Xóa một thiết bị khỏi danh sách.
