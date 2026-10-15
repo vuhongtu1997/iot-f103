@@ -61,7 +61,7 @@ Connect a normally-open push button between `PB12` and `GND`. The firmware confi
 STM32 PB12 ---- push button ---- GND
 ```
 
-Hold the button continuously for at least 5 seconds. The STM32 erases its saved Modbus address and restarts as an unconfigured node with address `0`. A short press has no effect. This reset does not erase the bootloader, application firmware, OTA key, or the compile-time `SENSOR_TYPE`. After reset, power only this unconfigured node while assigning it a new address.
+Hold the button continuously for at least 5 seconds. The STM32 erases its saved Modbus address and restarts as an unconfigured node with address `0`. A short press has no effect. This reset does not erase the bootloader, application firmware, or the compile-time `SENSOR_TYPE`. After reset, power only this unconfigured node while assigning it a new address.
 
 ### ESP32-C3 configuration button
 

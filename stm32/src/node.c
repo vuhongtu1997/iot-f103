@@ -90,7 +90,7 @@ void node_run(int boot_mode)
         {
             int ok = 0;
             uint8_t op = rx[2];
-            if (op == 1 && n == 51)
+            if (op == 1 && n == 19)
                 ok = stage_begin(rx + 3);
             if (op == 2 && n >= 8 && rx[7] > 0 && rx[7] <= CHUNK_SIZE && n == (size_t)8 + rx[7])
                 ok = stage_data(get32(rx + 3), rx + 8, rx[7]);

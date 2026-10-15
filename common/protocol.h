@@ -30,7 +30,7 @@
 /* Commissioning: Modbus broadcast address 0, FC06, register 0x0100, new ID.
  * Only unconfigured nodes accept it. Broadcasts never produce a response.
  * OTA operations: 1 begin, 2 data, 3 verify/activate, 4 progress.
- * Integers in custom frames and signed descriptor are little endian.
+ * Integers in custom frames and the OTA descriptor are little endian.
  * Standard FC03 registers retain Modbus big endian encoding. */
 static inline uint16_t get16(const uint8_t *p) {return (uint16_t)(p[0]|p[1]<<8);}
 static inline uint32_t get32(const uint8_t *p) {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
@@ -46,6 +46,6 @@ int constant_equal(const void *,const void *,size_t);
 #ifdef __cplusplus
 }
 #endif
-/* Header in external flash: descriptor[16], HMAC[32], READY[4], consumed[4]. */
-#define STAGE_HEADER_SIZE 56
+/* Header in external flash: descriptor[16], READY[4], consumed[4]. */
+#define STAGE_HEADER_SIZE 24
 #endif

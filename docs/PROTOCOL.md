@@ -18,7 +18,7 @@ After assignment and during discovery, the gateway reads FC03 register 12 to ide
 
 The gateway scans once after startup, then polls registered nodes every five seconds. Telemetry is published through the existing `deviceUpdate` MQTT command for the parent ID `rs485-{uid}` (or `rs485-pending-{address}` for an unconfirmed reservation) and, when recognized, its sensor child. Parent data includes `address`, `uid`, `version`, `mode`, `sensor_type`, `sensor_type_name`, `stt`, `quality`, `adc_raw`, and `millivolts`. Gas and CH3 child samples include `raw` and `millivolts`; temperature/humidity children currently report identification and online state only (`quality: "measurement_unavailable"`), because this STM32 firmware has no temperature/humidity sensor driver. MQTT-disconnected samples are not buffered; the next poll reports the latest node state after reconnection. Remote STM32 OTA is not wired into this gateway RPC integration.
 
-`scan` and `discover` only read assigned IDs; neither grants new addresses. No prefix discovery or special address-247 multicast is implemented. To return a configured node to its initial unconfigured state, hold its PB12-to-GND factory-reset button for at least 5 seconds. The node invalidates and erases both address configuration pages, then restarts with address 0. Firmware, OTA key, and compile-time sensor type are retained. No remote reset command is implemented.
+`scan` and `discover` only read assigned IDs; neither grants new addresses. No prefix discovery or special address-247 multicast is implemented. To return a configured node to its initial unconfigured state, hold its PB12-to-GND factory-reset button for at least 5 seconds. The node invalidates and erases both address configuration pages, then restarts with address 0. Firmware and compile-time sensor type are retained. No remote reset command is implemented.
 
 On ESP32-C3 the gateway uses UART1 at 38400 8N1 with TX=GPIO4, RX=GPIO5, and DE/RE=GPIO6. These GPIOs are shared with external JTAG on common C3 modules. This app build disables the old BLE device protocol, UDP discovery/provisioning service, Ethernet, and external DS1307 RTC. Wi-Fi is the only network transport and SNTP is the only time source. Wi-Fi credentials therefore need to be provisioned before boot using a mechanism outside this firmware.
 
@@ -44,13 +44,15 @@ Response for all OTA operations: op[1], success[1], received_bytes[4]. No automa
 
 | Op | Request payload after op | Purpose |
 |---|---|---|
-| 1 | descriptor[16], hmac[32] | Erase W25 metadata + staging sectors; begin session |
+| 1 | descriptor[16] | Erase W25 metadata + staging sectors; begin session |
 | 2 | offset[4], length[1], data[length] | Sequential data, length 1..128 |
-| 3 | none | Verify HMAC/CRC/vectors, write READY marker, ACK then reset |
+| 3 | none | Verify CRC32/vectors, write READY marker, ACK then reset |
 | 4 | none | Return RAM receive offset |
 
-Descriptor: model[4], size[4], CRC32[4], version[4], all LE. STM32 model=0x103c8, ESP32 model=0x32. CRC32 is reflected IEEE polynomial 0xedb88320, initial/final XOR 0xffffffff. HMAC-SHA256(key, descriptor || exact image bytes); no padding in authenticated message. Authentication is shared-secret HMAC, not an asymmetric signature.
+Descriptor: model[4], size[4], CRC32[4], version[4], all LE. STM32 model=0x103c8, ESP32 model=0x32. CRC32 is reflected IEEE polynomial 0xedb88320, initial/final XOR 0xffffffff.
 
-W25: descriptor at 0, MAC at 16, READY 0xa55a5aa5 at 48, consumed at 52 (initial erased 0xffffffff; zero after successful install), image at 0x1000. READY is written last. Bootloader revalidates the entire staged image before erase, writes internal vector after all other bytes and CRC verification, then marks consumed. No address 0 response, no broadcast OTA, no bootloader OTA.
+W25: descriptor at 0, READY `0xa55a5aa5` at 16, consumed at 20 (initial erased `0xffffffff`; zero after successful install), image at `0x1000`. READY is written last. Bootloader revalidates the staged image before erase, writes the internal vector after all other bytes and CRC verification, then marks the image consumed. No address 0 response, no broadcast OTA, no bootloader OTA.
 
-Application size 8..47104 bytes; initial MSP aligned to 8 bytes in 0x20000000..0x20005000 and Thumb reset vector inside actual application image. A wrong build address fails validation. Flash writes pad a final odd byte with 0xff; the padding is excluded from HMAC/CRC.
+Application size 8..47104 bytes; initial MSP aligned to 8 bytes in 0x20000000..0x20005000 and Thumb reset vector inside actual application image. A wrong build address fails validation. Flash writes pad a final odd byte with 0xff; the padding is excluded from CRC32.
+
+OTA no longer uses a shared key or cryptographic signature. CRC32 detects accidental corruption but cannot prove who produced the firmware. Restrict OTA commands and firmware downloads using MQTT ACL/TLS and HTTPS access control.

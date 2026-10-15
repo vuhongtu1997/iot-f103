@@ -1,8 +1,6 @@
 #define _GNU_SOURCE
 #include "node.h"
 #include "board.h"
-#include "sha256.h"
-#include "ota_key.h"
 #include <sys/mman.h>
 #include <assert.h>
 #include <stdio.h>
@@ -65,32 +63,8 @@ int nor_write(uint32_t a, const void *p, size_t n)
         external[a + i] &= s[i];
     return 1;
 }
-static void fromhex(const char *s, uint8_t *p, size_t n)
-{
-    for (size_t i = 0; i < n; i++)
-    {
-        unsigned v;
-        assert(sscanf(s + 2 * i, "%2x", &v) == 1);
-        p[i] = (uint8_t)v;
-    }
-}
 static void crypto(void)
 {
-    uint8_t out[32], expected[32];
-    sha256_ctx s;
-    sha256_init(&s);
-    sha256_update(&s, "abc", 3);
-    sha256_final(&s, out);
-    fromhex("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", expected, 32);
-    assert(!memcmp(out, expected, 32));
-    uint8_t key[20];
-    memset(key, 0x0b, 20);
-    hmac_ctx h;
-    hmac_init(&h, key, 20);
-    hmac_update(&h, "Hi There", 8);
-    hmac_final(&h, out);
-    fromhex("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7", expected, 32);
-    assert(!memcmp(out, expected, 32));
     assert(crc16("123456789", 9) == 0x4b37);
     assert((crc32_update(0xffffffff, "123456789", 9) ^ 0xffffffff) == 0xcbf43926);
     for (unsigned bits = 0; bits <= 96; bits++)
@@ -131,7 +105,7 @@ static void config_tests(void)
     assert(config_factory_reset());
     assert(config_address() == 0);
 }
-static uint8_t image[777], hdr[48];
+static uint8_t image[777], hdr[16];
 static void prepare(void)
 {
     for (unsigned i = 0; i < sizeof image; i++)
@@ -142,11 +116,6 @@ static void prepare(void)
     put32(hdr + 4, sizeof image);
     put32(hdr + 8, crc32_update(0xffffffff, image, sizeof image) ^ 0xffffffff);
     put32(hdr + 12, 2);
-    hmac_ctx h;
-    hmac_init(&h, OTA_KEY, 32);
-    hmac_update(&h, hdr, 16);
-    hmac_update(&h, image, sizeof image);
-    hmac_final(&h, hdr + 16);
     assert(stage_begin(hdr));
     assert(!stage_data(1, image, 10));
     assert(!stage_data(0, image, 0));
@@ -198,14 +167,7 @@ static void stage_tests(void)
     assert(get32((void *)(uintptr_t)APP_BASE) == 0xffffffff);
     nor_present = 1;
     assert(stage_install() == 1);
-    /* Valid CRC does not authorize a forged HMAC. */
-    prepare();
-    external[16] ^= 1;
-    assert(stage_commit());
-    old = erased;
-    assert(stage_install() == -1);
-    assert(erased == old);
-    puts("PASS: crypto vectors, prefix bounds, address power cuts, chunks, tampering, interrupted installation, vector-last safety");
+    puts("PASS: CRC vectors, prefix bounds, address power cuts, chunks, tampering, interrupted installation, vector-last safety");
 }
 int main(void)
 {

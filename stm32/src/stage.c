@@ -1,14 +1,12 @@
 #include "board.h"
 #include "node.h"
-#include "sha256.h"
-#include "ota_key.h"
 #include <string.h>
-static uint8_t header[48];
+static uint8_t header[16];
 static uint32_t received;
 static int uploading;
 uint32_t stage_received(void) { return received; }
 static int sane(const uint8_t *h) { return get32(h) == MODEL_STM32 && get32(h + 4) >= 8 && get32(h + 4) <= APP_MAX; }
-int stage_begin(const uint8_t h[48])
+int stage_begin(const uint8_t h[16])
 {
     uploading = 0;
     received = 0;
@@ -18,8 +16,8 @@ int stage_begin(const uint8_t h[48])
     for (uint32_t a = STAGE_BASE; a < STAGE_BASE + n; a += 4096)
         if (!nor_erase(a))
             return 0;
-    memcpy(header, h, 48);
-    if (!nor_write(0, h, 48))
+    memcpy(header, h, sizeof header);
+    if (!nor_write(0, h, sizeof header))
         return 0;
     uploading = 1;
     return 1;
@@ -47,13 +45,10 @@ static int verify_external(const uint8_t *h)
 {
     if (!sane(h))
         return 0;
-    uint8_t b[CHUNK_SIZE], mac[32];
+    uint8_t b[CHUNK_SIZE];
     uint32_t len = get32(h + 4), c = 0xffffffff;
     if (!nor_read(STAGE_BASE, b, 8) || !vectors_valid(b, len))
         return 0;
-    hmac_ctx ctx;
-    hmac_init(&ctx, OTA_KEY, 32);
-    hmac_update(&ctx, h, 16);
     for (uint32_t off = 0; off < len;)
     {
         uint32_t n = len - off;
@@ -62,11 +57,9 @@ static int verify_external(const uint8_t *h)
         if (!nor_read(STAGE_BASE + off, b, n))
             return 0;
         c = crc32_update(c, b, n);
-        hmac_update(&ctx, b, n);
         off += n;
     }
-    hmac_final(&ctx, mac);
-    return (c ^ 0xffffffff) == get32(h + 8) && constant_equal(mac, h + 16, 32);
+    return (c ^ 0xffffffff) == get32(h + 8);
 }
 int stage_commit(void)
 {
@@ -74,7 +67,7 @@ int stage_commit(void)
         return 0;
     uint8_t marker[4];
     put32(marker, READY_MAGIC);
-    if (!nor_write(48, marker, 4))
+    if (!nor_write(16, marker, 4))
         return 0;
     uploading = 0;
     return 1;
@@ -84,7 +77,7 @@ int stage_install(void)
     uint8_t h[STAGE_HEADER_SIZE];
     if (!nor_init() || !nor_read(0, h, sizeof h))
         return 0;
-    if (get32(h + 48) != READY_MAGIC || get32(h + 52) == 0)
+    if (get32(h + 16) != READY_MAGIC || get32(h + 20) == 0)
         return 0;
     if (!verify_external(h))
         return -1;
@@ -119,7 +112,7 @@ int stage_install(void)
     if (!flash_write(APP_BASE, vectors, 8))
         return -1;
     uint8_t done[4] = {0};
-    if (!nor_write(52, done, 4))
+    if (!nor_write(20, done, 4))
         return -1;
     return 1;
 }

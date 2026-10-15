@@ -36,7 +36,7 @@ void bus_send(const uint8_t *p, size_t n)
     replies++;
 }
 uint16_t sensor_raw(void) { return 123; }
-int stage_begin(const uint8_t p[48])
+int stage_begin(const uint8_t p[16])
 {
     (void)p;
     return 0;
