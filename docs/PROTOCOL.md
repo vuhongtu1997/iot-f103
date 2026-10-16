@@ -1,5 +1,10 @@
 # Wire protocol v1
 
+> Cloud telemetry uses MQTT 5 / schema v2. `assign_address` now requires
+> `data.sensorUid`; cloud UDP provisioning uses `setupCloud`. See
+> [Cloud v2](./CLOUD_V2.md) for the current telemetry and commissioning contract.
+
+
 UART 38400 8N1. Frame RTU: address[1], function[1], payload[N], CRC16[2] low byte first. Max 256 bytes. Custom integers LE; FC03 integers BE. Master waits for complete response before next transaction. Node recognizes silence >=3 ms between frames. UART errors drop the frame.
 
 ## Address commissioning: broadcast 0, FC06

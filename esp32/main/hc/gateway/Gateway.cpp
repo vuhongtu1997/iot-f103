@@ -8,6 +8,8 @@
 #include "Log.h"
 #include "Util.h"
 #include "Wifi.h"
+#include "TelemetryV2.h"
+#include "Sntp.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -25,9 +27,10 @@ Gateway *Gateway::getInstance()
     string mac = Wifi::GetMacAddress();
     LOGI("Gateway MAC: %s", mac.c_str());
     Config::getInstance()->ReadConfig();
-    string connectInfo = "hc-" + mac;
-    gateway = new Gateway(mac, Config::getInstance()->GetHost(), 1883,
-                          connectInfo, connectInfo, "123456abc",
+    Config *config = Config::getInstance();
+    string connectInfo = config->GetClientId().empty() ? "hc-" + mac : config->GetClientId();
+    gateway = new Gateway(mac, config->GetHost(), config->GetPort(),
+                          connectInfo, config->GetUsername(), config->GetPassword(),
                           Config::getInstance()->GetKeepAlive());
   }
   return gateway;
@@ -370,4 +373,15 @@ int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
     update["device"].append(child);
   }
   return PushDeviceUpdateCloud(update);
+}
+
+int Gateway::PublishTelemetryV2(const TelemetryV2 &batch)
+{
+  if (!IsConnected() || !Sntp::haveTime())
+    return CODE_TIMEOUT;
+  std::string payload;
+  // Use the active connection's credentials until reboot applies new provisioning.
+  if (!batch.Serialize(GetUsername(), GetPassword(), time(nullptr), payload))
+    return CODE_FORMAT_ERROR;
+  return Publish("smarttoilet/v2/" + GetUsername() + "/telemetry", payload, 1);
 }

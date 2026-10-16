@@ -22,7 +22,7 @@
 /**
  * @brief Kích thước tối đa cho các giá trị chuỗi trong cấu hình.
  */
-#define STRING_VALUE_MAX_SIZE 128
+#define STRING_VALUE_MAX_SIZE 256
 
 //======================================================================
 // Định nghĩa các khóa (key) và giá trị mặc định cho cấu hình MQTT
@@ -187,6 +187,11 @@ public:
 	 * @return true nếu cập nhật thành công.
 	 */
 	bool SetPassword(std::string password);
+
+	/** Atomically save MQTT host, gateway UID, ingest token and port. */
+	bool SetCloudConnection(const std::string &host,
+						const std::string &user,
+						const std::string &password, int port);
 
 	/**
 	 * @brief Thiết lập giá trị keep-alive.

@@ -25,6 +25,8 @@
 #include "DeviceModbusCH3.h"
 #include "DeviceModbusPressure.h"
 #include "Gateway.h"
+#include "TelemetryV2.h"
+#include "Sntp.h"
 #include "Log.h"
 
 namespace
@@ -81,6 +83,7 @@ namespace
         std::to_string(node.address);
     Json::Value data = Json::objectValue;
     data["uid"] = uid;
+    data["sensor_uid"] = node.sensorUid;
     data["parent_id"] = parentId;
     data["address"] = node.address;
     data["sensor_type"] = node.sensorType;
@@ -176,6 +179,7 @@ namespace
           "RS485 node " + std::to_string(node.address);
       Json::Value data = Json::objectValue;
       data["uid"] = uid;
+      data["sensor_uid"] = node.sensorUid;
       data["version"] = static_cast<Json::UInt64>(node.version);
       data["mode"] = node.mode;
       data["sensor_type"] = node.sensorType;
@@ -249,6 +253,7 @@ namespace
       const std::string name = "RS485 node " + std::to_string(node.address);
       Json::Value data = Json::objectValue;
       data["uid"] = uid;
+      data["sensor_uid"] = node.sensorUid;
       data["version"] = static_cast<Json::UInt64>(node.version);
       data["mode"] = node.mode;
       data["sensor_type"] = node.sensorType;
@@ -320,7 +325,7 @@ namespace
 
   bool LoadRegistry()
   {
-    memset(registeredNodes, 0, sizeof(registeredNodes));
+    std::fill_n(registeredNodes, MAX_NODES, ModbusNodeInfo{});
     registeredNodeCount = 0;
     const std::vector<DeviceModbus *> devices =
         DeviceManager::getInstance()->GetListDeviceModbus();
@@ -339,6 +344,12 @@ namespace
       node.version = device->GetFirmwareVersion();
       node.mode = device->GetMode();
       node.sensorType = device->GetSensorType();
+      const Json::Value data = device->GetData();
+      const std::string sensorUid = data["sensor_uid"].isString()
+          ? data["sensor_uid"].asString() : "";
+      if (sensorUid.size() > 128 || sensorUid.find('\0') != std::string::npos)
+        return false;
+      node.sensorUid = sensorUid;
       const std::string storedUid = device->GetUid();
       if (!storedUid.empty() && !device->CopyUid(node.uid))
       {
@@ -468,7 +479,7 @@ namespace
         response[14] != address)
       return -1;
 
-    memset(node, 0, sizeof(*node));
+    *node = ModbusNodeInfo{};
     node->address = address;
     node->mode = response[12];
     node->version = (static_cast<uint32_t>(response[7]) << 24) |
@@ -514,12 +525,15 @@ namespace
 
       std::vector<ModbusNodeInfo> nodes;
       ModbusGetNodes(nodes);
+      TelemetryV2 batch;
       for (const ModbusNodeInfo &node : nodes)
       {
         uint16_t registers[DIGITAL_REGISTER_COUNT]{};
         const bool online = ModbusReadNode(node, registers);
-        Gateway::getInstance()->PublishModbusTelemetry(node, registers, online);
+        if (online && Sntp::haveTime())
+          batch.Add(node, registers, time(nullptr));
       }
+      Gateway::getInstance()->PublishTelemetryV2(batch);
       vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
     }
   }
@@ -567,7 +581,7 @@ bool ModbusBusInit()
   }
   initialized = true;
 
-  if (xTaskCreate(PollTask, "modbus_poll", 4096, nullptr, 5, nullptr) != pdPASS)
+  if (xTaskCreate(PollTask, "modbus_poll", 6144, nullptr, 5, nullptr) != pdPASS)
   {
     initialized = false;
     uart_driver_delete(BUS_UART);
@@ -587,9 +601,9 @@ bool ModbusDiscoverNodes()
   if (!initialized)
     return false;
 
-  memset(scanNodes, 0, sizeof(scanNodes));
+  std::fill_n(scanNodes, MAX_NODES, ModbusNodeInfo{});
   size_t count = registeredNodeCount;
-  memcpy(scanNodes, registeredNodes, count * sizeof(scanNodes[0]));
+  std::copy_n(registeredNodes, count, scanNodes);
 
   for (unsigned address = 1; address <= MAX_NODES; ++address)
   {
@@ -630,25 +644,29 @@ bool ModbusDiscoverNodes()
     {
       discovered.sensorType = scanNodes[slot].sensorType;
     }
+    if (slot < count)
+      discovered.sensorUid = scanNodes[slot].sensorUid;
     scanNodes[slot] = discovered;
   }
 
   const size_t previousCount = registeredNodeCount;
-  memcpy(previousNodes, registeredNodes, previousCount * sizeof(previousNodes[0]));
-  memcpy(registeredNodes, scanNodes, count * sizeof(scanNodes[0]));
+  std::copy_n(registeredNodes, previousCount, previousNodes);
+  std::copy_n(scanNodes, count, registeredNodes);
   registeredNodeCount = count;
   if (PersistRegistry(previousNodes, previousCount))
     return true;
 
-  memcpy(registeredNodes, previousNodes,
-         previousCount * sizeof(previousNodes[0]));
+  std::copy_n(previousNodes, previousCount, registeredNodes);
   registeredNodeCount = previousCount;
   return false;
 }
 
-int ModbusAssignAddress(uint8_t address, ModbusNodeInfo *assigned)
+int ModbusAssignAddress(uint8_t address, ModbusNodeInfo *assigned,
+                        const std::string &sensorUid)
 {
   std::lock_guard<std::mutex> lock(busMutex);
+  if (sensorUid.size() > 128 || sensorUid.find('\0') != std::string::npos)
+    return -4;
   if (!initialized || address == 0 || address > MAX_NODES ||
       registeredNodeCount == MAX_NODES)
     return -4;
@@ -668,16 +686,16 @@ int ModbusAssignAddress(uint8_t address, ModbusNodeInfo *assigned)
   }
 
   const size_t previousCount = registeredNodeCount;
-  memcpy(previousNodes, registeredNodes,
-         previousCount * sizeof(previousNodes[0]));
+  std::copy_n(registeredNodes, previousCount, previousNodes);
   const size_t slot = registeredNodeCount++;
-  memset(&registeredNodes[slot], 0, sizeof(registeredNodes[slot]));
+  registeredNodes[slot] = ModbusNodeInfo{};
   registeredNodes[slot].address = address;
   registeredNodes[slot].mode = 2;
+  registeredNodes[slot].sensorUid = sensorUid;
   if (!PersistRegistry(previousNodes, previousCount))
   {
     --registeredNodeCount;
-    memset(&registeredNodes[slot], 0, sizeof(registeredNodes[slot]));
+    registeredNodes[slot] = ModbusNodeInfo{};
     return -5;
   }
 
@@ -702,20 +720,18 @@ int ModbusAssignAddress(uint8_t address, ModbusNodeInfo *assigned)
         if (constant_equal(registeredNodes[i].uid, probe.uid,
                            sizeof(probe.uid)))
         {
-          memcpy(registeredNodes, previousNodes,
-                 registeredNodeCount * sizeof(previousNodes[0]));
+          std::copy_n(previousNodes, registeredNodeCount, registeredNodes);
           registeredNodeCount = slot + 1;
           return -3;
         }
       }
       const size_t assignedPreviousCount = registeredNodeCount;
-      memcpy(previousNodes, registeredNodes,
-             assignedPreviousCount * sizeof(previousNodes[0]));
+      std::copy_n(registeredNodes, assignedPreviousCount, previousNodes);
+      probe.sensorUid = registeredNodes[slot].sensorUid;
       registeredNodes[slot] = probe;
       if (!PersistRegistry(previousNodes, assignedPreviousCount))
       {
-        memcpy(registeredNodes, previousNodes,
-               assignedPreviousCount * sizeof(previousNodes[0]));
+        std::copy_n(previousNodes, assignedPreviousCount, registeredNodes);
         registeredNodeCount = assignedPreviousCount;
         return -5;
       }
@@ -726,6 +742,24 @@ int ModbusAssignAddress(uint8_t address, ModbusNodeInfo *assigned)
     vTaskDelay(pdMS_TO_TICKS(100));
   }
   return -3;
+}
+
+bool ModbusSetSensorUid(uint8_t address, const std::string &sensorUid)
+{
+  std::lock_guard<std::mutex> lock(busMutex);
+  if (!initialized || sensorUid.empty() || sensorUid.size() > 128 ||
+      sensorUid.find('\0') != std::string::npos)
+    return false;
+  for (size_t i = 0; i < registeredNodeCount; ++i)
+  {
+    if (registeredNodes[i].address != address) continue;
+    std::copy_n(registeredNodes, registeredNodeCount, previousNodes);
+    registeredNodes[i].sensorUid = sensorUid;
+    if (PersistRegistry(previousNodes, registeredNodeCount)) return true;
+    std::copy_n(previousNodes, registeredNodeCount, registeredNodes);
+    return false;
+  }
+  return false;
 }
 
 void ModbusGetNodes(std::vector<ModbusNodeInfo> &nodes)

@@ -166,7 +166,7 @@ void Config::Print()
 	LOGI("port: %d", port);
 	LOGI("clientId: %s", clientId.c_str());
 	LOGI("username: %s", username.c_str());
-	LOGI("password: %s", password.c_str());
+	LOGI("password: %s", password.empty() ? "not configured" : "configured");
 	LOGI("keepAlive: %d", keepAlive);
 }
 
@@ -255,6 +255,30 @@ bool Config::SetPassword(string password)
 	return false;
 }
 
+bool Config::SetCloudConnection(const std::string &newHost,
+								const std::string &user,
+								const std::string &newPassword, int newPort)
+{
+	esp_err_t err;
+	std::shared_ptr<nvs::NVSHandle> handle = openConfigNvs(err);
+	if (err != ESP_OK)
+		return false;
+	if (handle->set_string(HOST_KEY, newHost.c_str()) != ESP_OK ||
+		handle->set_string(USERNAME_KEY, user.c_str()) != ESP_OK ||
+		handle->set_string(PASSWORD_KEY, newPassword.c_str()) != ESP_OK ||
+		handle->set_item(PORT_KEY, newPort) != ESP_OK ||
+		handle->commit() != ESP_OK)
+	{
+		LOGE("Cannot save cloud connection settings");
+		return false;
+	}
+	host = newHost;
+	username = user;
+	password = newPassword;
+	port = newPort;
+	return true;
+}
+
 bool Config::SetKeepAlive(int keepAlive)
 {
 	if (set_int_config_entry(KEEP_ALIVE_KEY, KEEP_ALIVE_KEY, keepAlive))
@@ -314,6 +338,10 @@ std::string Config::GetThingId()
 bool Config::ClearProvisioningData()
 {
 	bool ok = true;
+	for (const char *key : {HOST_KEY, PORT_KEY, CLIENT_ID_KEY, USERNAME_KEY, PASSWORD_KEY, KEEP_ALIVE_KEY})
+	{
+		ok = erase_config_entry(key) && ok;
+	}
 	ok = erase_config_entry(HC_CFG_JSON_KEY) && ok;
 	ok = erase_config_entry(WIFI_SSID_KEY) && ok;
 	ok = erase_config_entry(WIFI_PASS_KEY) && ok;

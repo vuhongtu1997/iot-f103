@@ -1,5 +1,6 @@
 #include "UdpProvisioning.h"
 #include "Wifi.h"
+#include "Config.h"
 #include "json.h"
 #include "Log.h"
 #include "ErrorCode.h"
@@ -61,7 +62,8 @@ namespace
       if (cmd == "aiHubBroadCast")
         response["cmd"] = "getHcInfoRsp";
     }
-    else if (cmd == "HC_SCAN_WIFI" || cmd == "setupHC")
+    else if (cmd == "HC_SCAN_WIFI" || cmd == "setupHC" ||
+             cmd == "setupCloud")
     {
       // Accept credential changes only from the setup AP subnet while it is active.
       if (!Wifi::IsProvisioningPeer(peer.sin_addr.s_addr))
@@ -81,6 +83,49 @@ namespace
         if (!Wifi::ScanWifi(networks))
           response["data"]["code"] = CODE_ERROR;
         response["DATA"] = networks;
+      }
+      else if (cmd == "setupCloud")
+      {
+        if (!data["host"].isString() || !data["user"].isString() ||
+            !data["pass"].isString() || !data["port"].isInt())
+        {
+          response["data"]["code"] = CODE_FORMAT_ERROR;
+          response["data"]["error"] = "host, user, pass and port are required";
+        }
+        else
+        {
+          const std::string host = data["host"].asString();
+          const std::string user = data["user"].asString();
+          const std::string password = data["pass"].asString();
+          const int cloudPort = data["port"].asInt();
+          const bool valid = !host.empty() && host.size() <= 253 &&
+              !user.empty() && user.size() <= 128 &&
+              !password.empty() && password.size() <= 255 &&
+              cloudPort >= 1 && cloudPort <= 65535 &&
+              host.find('\0') == std::string::npos &&
+              user.find('\0') == std::string::npos &&
+              user.find_first_of("/+#") == std::string::npos &&
+              password.find('\0') == std::string::npos;
+          if (!valid)
+          {
+            response["data"]["code"] = CODE_FORMAT_ERROR;
+            response["data"]["error"] = "invalid cloud connection settings";
+          }
+          else if (!Config::getInstance()->SetCloudConnection(
+                       host, user, password, cloudPort))
+          {
+            response["data"]["code"] = CODE_ERROR;
+            response["data"]["error"] = "could not persist cloud settings";
+          }
+          else
+          {
+            response["data"]["status"] = "saved";
+            response["data"]["reboot_required"] = true;
+            response["data"]["host"] = host;
+            response["data"]["user"] = user;
+            response["data"]["port"] = cloudPort;
+          }
+        }
       }
       else if (!data["ssid"].isString() || !data["pass"].isString())
       {

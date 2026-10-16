@@ -77,6 +77,25 @@ class WifiUdpClient(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(sock.sent["data"]["pass"], "")
 
+    def test_cloud_credentials_and_saved_response(self):
+        result, sock = self.run_client(
+            ["cloud", "--cloud-host", "emqx.local", "--cloud-port", "1884", "--user", "gw-A1"],
+            [{"code": 0, "status": "saved", "reboot_required": True}])
+        self.assertEqual(result, 0)
+        self.assertEqual(sock.sent["cmd"], "setupCloud")
+        self.assertEqual(sock.sent["data"], {
+            "host": "emqx.local", "port": 1884, "user": "gw-A1", "pass": "secret-password"})
+
+    def test_cloud_save_failure(self):
+        result, _ = self.run_client(
+            ["cloud", "--cloud-host", "emqx.local", "--user", "gw-A1"], [{"code": -1}])
+        self.assertEqual(result, 1)
+
+    def test_cloud_rejects_bad_port_and_topic_wildcards(self):
+        for extra in (["--cloud-port", "65536", "--user", "gw-A1"], ["--user", "gw/#"]):
+            with self.subTest(extra=extra), self.assertRaises(SystemExit):
+                self.run_client(["cloud", "--cloud-host", "emqx.local", *extra], [])
+
 
 if __name__ == "__main__":
     unittest.main()

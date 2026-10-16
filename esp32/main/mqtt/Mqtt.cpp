@@ -231,7 +231,7 @@ Mqtt::Mqtt(string host, int port, string clientId, string username, string passw
 
 void Mqtt::Init()
 {
-	LOGI("Mqtt connect: client id: %s, host: %s, port: %d, username: %s, password: %s", clientId.c_str(), host.c_str(), port, username.c_str(), password.c_str());
+	LOGI("Mqtt connect: client id: %s, host: %s, port: %d, username: %s", clientId.c_str(), host.c_str(), port, username.c_str());
 	esp_mqtt_client_config_t mqtt_cfg = {0};
 	// mqtt_cfg.broker.address.uri = host.c_str();
 	mqtt_cfg.broker.address.hostname = host.c_str();
@@ -244,6 +244,7 @@ void Mqtt::Init()
 	mqtt_cfg.session.last_will.msg = willsetPayload.c_str();
 	mqtt_cfg.session.last_will.msg_len = (int)willsetPayload.length();
 	mqtt_cfg.session.keepalive = keepalive;
+	mqtt_cfg.session.protocol_ver = MQTT_PROTOCOL_V_5;
 	mqtt_cfg.task.stack_size = 10 * 1024;
 	mqtt_cfg.buffer.size = 20 * 1024;
 
@@ -329,13 +330,13 @@ int Mqtt::Unsubscribe(string topic)
 	return 0;
 }
 
-int Mqtt::Publish(string topic, string payload)
+int Mqtt::Publish(string topic, string payload, int qos)
 {
-	printf("Publish Topic: %s\nMessage: %s\n", topic.c_str(), payload.c_str());
+	LOGD("Publish topic=%s bytes=%u", topic.c_str(), static_cast<unsigned>(payload.size()));
 	if (!client)
 		return -1;
 	int msgId = esp_mqtt_client_publish(
-		client, topic.c_str(), payload.c_str(), payload.length(), 0, 0);
+		client, topic.c_str(), payload.c_str(), payload.length(), qos, 0);
 	if (msgId < 0)
 	{
 		LOGE("MQTT publish enqueue failed: topic=%s connected=%d",

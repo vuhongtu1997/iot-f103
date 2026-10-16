@@ -124,7 +124,7 @@ public:
 	 * @param payload Nội dung chuỗi gửi.
 	 * @return ID của message hoặc lỗi nếu thất bại.
 	 */
-	int Publish(std::string topic, std::string payload);
+	int Publish(std::string topic, std::string payload, int qos = 0);
 
 	/**
 	 * @brief Gửi dữ liệu nhị phân đến một topic.

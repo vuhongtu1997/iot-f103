@@ -14,6 +14,8 @@
 
 void Gateway::InitMqttMessageRs485()
 {
+    OnDeviceRpcCallbackRegister(
+        "set_sensor_uid", bind(&Gateway::OnModbusSetSensorUid, this, placeholders::_1, placeholders::_2));
 	OnDeviceRpcCallbackRegister(
 		"scan", bind(&Gateway::OnModbusDiscover, this, placeholders::_1, placeholders::_2));
 	OnDeviceRpcCallbackRegister(
@@ -37,6 +39,7 @@ int Gateway::OnModbusDiscover(Json::Value &, Json::Value &respValue)
 			snprintf(uid + i * 2, sizeof(uid) - i * 2, "%02x", node.uid[i]);
 		Json::Value item;
 		item["address"] = node.address;
+		item["sensorUid"] = node.sensorUid;
 		item["uid"] = uid;
 		item["version"] = static_cast<Json::UInt64>(node.version);
 		item["mode"] = node.mode;
@@ -60,6 +63,23 @@ int Gateway::OnModbusDiscover(Json::Value &, Json::Value &respValue)
 	return CODE_OK;
 }
 
+int Gateway::OnModbusSetSensorUid(Json::Value &req, Json::Value &resp)
+{
+    resp["method"] = "set_sensor_uidRsp";
+    resp["params"]["code"] = CODE_FORMAT_ERROR;
+    if (!req["address"].isInt() || req["address"].asInt() < 1 ||
+        req["address"].asInt() > MAX_NODES || !req["sensorUid"].isString() ||
+        req["sensorUid"].asString().empty() || req["sensorUid"].asString().size() > 128 ||
+        req["sensorUid"].asString().find('\0') != std::string::npos)
+        return CODE_OK;
+    const bool saved = ModbusSetSensorUid(static_cast<uint8_t>(req["address"].asInt()),
+                                         req["sensorUid"].asString());
+    resp["params"]["code"] = saved ? CODE_OK : CODE_ERROR;
+    resp["params"]["address"] = req["address"];
+    resp["params"]["sensorUid"] = req["sensorUid"];
+    return CODE_OK;
+}
+
 int Gateway::OnModbusAssignAddress(Json::Value &reqValue, Json::Value &respValue)
 {
 	respValue["method"] = "assign_addressRsp";
@@ -72,9 +92,18 @@ int Gateway::OnModbusAssignAddress(Json::Value &reqValue, Json::Value &respValue
 		return CODE_OK;
 	}
 
+	if (!reqValue["sensorUid"].isString() ||
+        reqValue["sensorUid"].asString().empty() ||
+        reqValue["sensorUid"].asString().size() > 128 ||
+        reqValue["sensorUid"].asString().find('\0') != std::string::npos)
+    {
+        respValue["params"]["error"] = "sensorUid must contain 1-128 bytes and no NUL";
+        return CODE_OK;
+    }
 	ModbusNodeInfo assigned{};
 	int result = ModbusAssignAddress(
-		static_cast<uint8_t>(reqValue["address"].asInt()), &assigned);
+		static_cast<uint8_t>(reqValue["address"].asInt()), &assigned,
+        reqValue["sensorUid"].asString());
 	respValue["params"]["code"] = result == 1 ? CODE_OK : CODE_ERROR;
 	respValue["params"]["result"] = result;
 	if (result == 1)
@@ -83,6 +112,7 @@ int Gateway::OnModbusAssignAddress(Json::Value &reqValue, Json::Value &respValue
 		for (size_t i = 0; i < sizeof(assigned.uid); ++i)
 			snprintf(uid + i * 2, sizeof(uid) - i * 2, "%02x", assigned.uid[i]);
 		respValue["params"]["address"] = assigned.address;
+		respValue["params"]["sensorUid"] = assigned.sensorUid;
 		respValue["params"]["uid"] = uid;
 		respValue["params"]["version"] = static_cast<Json::UInt64>(assigned.version);
 		respValue["params"]["sensor_type"] = assigned.sensorType;

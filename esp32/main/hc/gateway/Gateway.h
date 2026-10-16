@@ -47,6 +47,7 @@
  * @warning Một số chức năng phụ thuộc macro cấu hình (ví dụ:
  * Modbus RTU qua RS485).
  */
+class TelemetryV2;
 class Gateway : public CloudProtocol
 {
 private:
@@ -120,6 +121,7 @@ private:
   int OnOtaHc(Json::Value &reqValue, Json::Value &respValue, std::string &topicRsp);
   int OnModbusDiscover(Json::Value &reqValue, Json::Value &respValue);
   int OnModbusAssignAddress(Json::Value &reqValue, Json::Value &respValue);
+  int OnModbusSetSensorUid(Json::Value &reqValue, Json::Value &respValue);
 
 public:
   /**
@@ -227,6 +229,7 @@ public:
   int PushDeviceUpdateCloud(Device *device, Json::Value &telemetryValue);
   int PushDeviceOnlineState(Device *device, bool isOnline);
   int PushGatewayStatus();
+  int PublishTelemetryV2(const TelemetryV2 &batch);
   int PublishModbusTelemetry(const ModbusNodeInfo &node,
                                     const uint16_t registers[DIGITAL_REGISTER_COUNT], bool online);
 };

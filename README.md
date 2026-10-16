@@ -1,10 +1,17 @@
 # ESP32-C3 MQTT gateway with RS485 Modbus RTU
 
+Cloud telemetry now uses **MQTT 5 / schema v2**, provisioned with UDP
+`setupCloud` (`host`, `user`, `pass`, `port`). `assign_address` requires
+`data.sensorUid`; existing nodes can use `set_sensor_uid`. See
+[Cloud v2 setup and mapping](./docs/CLOUD_V2.md) for current commands, payload
+rules and sensor limitations. The v3 RPC topics remain for management.
+
+
 An alternative **ESP32-C3 sensor node replacing STM32F103** is available in
 [`esp32c3-node`](./esp32c3-node/README.md). It uses the same RS485 commissioning
 and sensor registers with the existing gateway. The original STM32 project is retained.
 
-This ESP-IDF application keeps the existing gateway/cloud MQTT protocol and adds a Modbus RTU master for sensor nodes over RS485. The ESP32 target is **ESP32-C3**. BLE device communication, Ethernet, and an external RTC are not included in this build. Wi-Fi is the network transport, with UDP discovery and Wi-Fi configuration on port **8181**. SNTP over Wi-Fi is the time source. See [UDP Wi-Fi setup](./docs/UDP_WIFI.md).
+This ESP-IDF application keeps the existing management RPC protocol, publishes cloud telemetry v2, and provides a Modbus RTU master for sensor nodes over RS485. The ESP32 target is **ESP32-C3**. BLE device communication, Ethernet, and an external RTC are not included in this build. Wi-Fi is the network transport, with UDP discovery and Wi-Fi configuration on port **8181**. SNTP over Wi-Fi is the time source. See [UDP Wi-Fi setup](./docs/UDP_WIFI.md).
 
 ## Features
 
@@ -13,7 +20,7 @@ This ESP-IDF application keeps the existing gateway/cloud MQTT protocol and adds
 - Accepts MQTT RPC commands `scan`, `discover` and `assign_address`.
 - Persists an address reservation before the single broadcast FC06 assignment, then stores the UID after read-back confirmation.
 - Reads the node's FC03 sensor type after address assignment and persists a typed sensor child (gas, temperature/humidity, water pressure, or legacy CH3) alongside its Modbus node in SQLite.
-- Publishes the node and recognized child status through the gateway's existing `deviceUpdate` MQTT command.
+- Joins sensor readings with cloud sensor UIDs stored in SQLite and publishes schema v2 batches.
 - ESP32-C3 nodes measure ZE03 H2S + NH3 or ZS03 temperature/humidity. WPCH01 has an I2C diagnostic bus and typed telemetry, but pressure decoding still requires its unpublished protocol. See [node wiring and profiles](./esp32c3-node/README.md). Legacy STM32 gas/CH3 nodes retain ADC telemetry.
 
 The gateway does **not** use the standalone `main` branch's `iot/{gateway}/commands` topics, `job_id` command format, queueing, or remote STM32 OTA integration. See [docs/PROTOCOL.md](./docs/PROTOCOL.md) for the current MQTT RPC and Modbus details.
@@ -124,7 +131,7 @@ Only power **one unconfigured node at a time** while assigning an address. Confi
 3. Send an `assign_address` RPC with an integer address from 1 to 247:
 
    ```json
-   {"cmd":"assign_address","rqi":"request-id","data":{"address":5}}
+   {"cmd":"assign_address","rqi":"request-id","data":{"address":5,"sensorUid":"gas-TH-KIMDONG-A1-1"}}
    ```
 
 4. Wait for a successful RPC response, including the confirmed UID. The gateway checks the registry and current bus occupancy, persists an address reservation, sends one FC06 broadcast, then reads the assigned node back.
@@ -132,13 +139,19 @@ Only power **one unconfigured node at a time** while assigning an address. Confi
 
 Use `scan` or `discover` to enumerate currently responding nodes; neither command assigns addresses. Modbus nodes and pending address reservations are stored in the existing SQLite `Device` table and retained across reboots, including offline nodes. Do not delete those rows unless all physical nodes and their configured addresses have been reconciled.
 
-RPC commands follow the gateway's existing JSON contract: requests contain `cmd`, `rqi`, and object-valued `data`; the response method is `discoverRsp` or `assign_addressRsp`. `assign_address` takes `data: {"address": 5}`. It does not use the standalone firmware's `op`, `job_id`, or `address` top-level command schema.
+RPC commands follow the gateway's existing JSON contract: requests contain `cmd`, `rqi`, and object-valued `data`; the response method is `discoverRsp` or `assign_addressRsp`. `assign_address` takes `data: {"address": 5, "sensorUid": "gas-TH-KIMDONG-A1-1"}`. It does not use the standalone firmware's `op`, `job_id`, or `address` top-level command schema.
 
 ## Telemetry
 
-For a node with a known UID, the gateway publishes a `deviceUpdate` with device ID `rs485-{uid}`. Pending address reservations without a confirmed UID use `rs485-pending-{address}`. Data includes address, UID, version, mode, online status (`stt`), quality, ADC raw count, and millivolts when online.
+The gateway publishes schema v2 to `smarttoilet/v2/{gateway_uid}/telemetry`
+with MQTT 5, QoS 1 and retain false. CONNECT username is the gateway UID;
+CONNECT password and the JSON `ingest_token` are the provisioned ingest token.
+Readings are matched with `sensorUid` persisted during address assignment.
+See [Cloud v2](./docs/CLOUD_V2.md) for batching, timestamps, environment merging,
+legacy sensor limitations and updating cloud UIDs on existing devices.
 
-Telemetry is not buffered while MQTT is disconnected; a later poll publishes the latest available node state after reconnection. Remote STM32 OTA is not connected to the current gateway RPC flow.
+Telemetry is not buffered while MQTT is disconnected. Remote STM32 OTA is not
+connected to the current gateway RPC flow.
 
 ## Safety notes
 

@@ -1,5 +1,10 @@
 # Bản tin JSON MQTT cho gateway RS485
 
+> Cloud telemetry uses MQTT 5 / schema v2. `assign_address` now requires
+> `data.sensorUid`; cloud UDP provisioning uses `setupCloud`. See
+> [Cloud v2](./CLOUD_V2.md) for the current telemetry and commissioning contract.
+
+
 Tài liệu này mô tả các bản tin MQTT liên quan đến gateway ESP32-C3 và các node STM32 Modbus. `{mac}` là MAC/ID của gateway được dùng khi khởi tạo `Gateway`.
 
 ## Topic

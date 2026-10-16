@@ -10,14 +10,17 @@ import uuid
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("discover", "scan", "setup"))
+    parser.add_argument("action", choices=("discover", "scan", "setup", "cloud"))
     parser.add_argument("--host", default="192.168.4.1")
     parser.add_argument("--port", type=int, default=8181)
     parser.add_argument("--ssid")
+    parser.add_argument("--cloud-host")
+    parser.add_argument("--cloud-port", type=int, default=1883)
+    parser.add_argument("--user", help="Gateway device_uid")
     parser.add_argument("--open", action="store_true", help="Use an open Wi-Fi network")
     args = parser.parse_args()
     data = {}
-    command = {"discover": "SCAN_HC", "scan": "HC_SCAN_WIFI", "setup": "setupHC"}[args.action]
+    command = {"discover": "SCAN_HC", "scan": "HC_SCAN_WIFI", "setup": "setupHC", "cloud": "setupCloud"}[args.action]
     if args.action == "setup":
         if not args.ssid:
             parser.error("setup requires --ssid")
@@ -27,6 +30,18 @@ def main():
         password = data["pass"]
         if "\0" in password or (password and not 8 <= len(password.encode()) <= 63):
             parser.error("Wi-Fi password must contain 8-63 bytes, or use --open")
+    if args.action == "cloud":
+        if not args.cloud_host or not args.user:
+            parser.error("cloud requires --cloud-host and --user")
+        token = getpass.getpass("Ingest token: ")
+        if (not 1 <= len(args.cloud_host.encode()) <= 253 or
+                not 1 <= len(args.user.encode()) <= 128 or
+                not 1 <= len(token.encode()) <= 255 or
+                not 1 <= args.cloud_port <= 65535 or
+                any("\0" in value for value in (args.cloud_host, args.user, token)) or
+                any(char in args.user for char in "/+#")):
+            parser.error("Invalid cloud host, user, token or port")
+        data = {"host": args.cloud_host, "user": args.user, "pass": token, "port": args.cloud_port}
     request_id = str(uuid.uuid4())
     packet = json.dumps({"cmd": command, "rqi": request_id, "data": data}).encode()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:

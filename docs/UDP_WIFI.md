@@ -1,5 +1,10 @@
 # Cấu hình Wi-Fi master ESP32-C3 qua UDP
 
+> Cloud telemetry uses MQTT 5 / schema v2. `assign_address` now requires
+> `data.sensorUid`; cloud UDP provisioning uses `setupCloud`. See
+> [Cloud v2](./CLOUD_V2.md) for the current telemetry and commissioning contract.
+
+
 Chức năng này thuộc firmware master `esp32/`, không thuộc `esp32c3-node/`.
 Giữ tên lệnh UDP cũ và envelope `cmd` / `rqi` / `data`, cổng **8181**.
 
