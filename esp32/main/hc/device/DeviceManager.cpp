@@ -4,6 +4,7 @@
 #include "DeviceModbusGas.h"
 #include "DeviceModbusTemperatureHumidity.h"
 #include "DeviceModbusCH3.h"
+#include "DeviceModbusPressure.h"
 #include "Log.h"
 
 #include <algorithm>
@@ -58,6 +59,9 @@ namespace
     if (type == DeviceModbus::CH3_TYPE)
       return new DeviceModbusCH3(id, name, uid, address, firmwareVersion,
                                  sensorType, dataJson);
+    if (type == DeviceModbus::PRESSURE_TYPE)
+      return new DeviceModbusPressure(id, name, uid, address, firmwareVersion,
+                                     sensorType, dataJson);
     return nullptr;
   }
 } // namespace

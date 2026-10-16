@@ -89,7 +89,17 @@ Nếu quét bus hoặc lưu registry thất bại, `params.code` là `-1` và re
 "error": "Modbus scan failed or registry could not be saved"
 ```
 
-`sensor_type` có các giá trị: `0` unknown, `1` gas, `2` temperature/humidity, `3` CH3. Trường `child_device` chỉ xuất hiện khi loại cảm biến được nhận dạng.
+`sensor_type` có các giá trị: `0` unknown, `1` gas, `2` temperature/humidity, `3` CH3 legacy, `4` water_pressure. Trường `child_device` chỉ xuất hiện khi loại cảm biến được nhận dạng.
+
+Node ESP32-C3 digital dùng type `1` cho hai ZE03 H2S + NH3, `2` cho ZS03 và `4`
+cho WPCH01. Parent và child gửi các trường `h2s_ppm`, `nh3_ppm`, `temperature_c`,
+`humidity_rh` hoặc `pressure_pa` theo loại. Giá trị không hợp lệ hoặc offline là
+`null`; `quality` có thể là `ok`, `partial`, `sensor_error`, `warming_up`,
+`configuration_required`, `measurement_unavailable`, `bootloader`, `offline`.
+Child áp suất có type `MODBUS_PRESSURE`, ID `rs485-{uid}-water-pressure`.
+WPCH01 hiện chỉ khởi tạo/dò bus I2C, chưa đọc áp suất do chưa có giao thức I2C
+được xác nhận: `pressure_pa=null`, `quality=configuration_required`.
+Các mô tả raw/millivolt bên dưới áp dụng cho STM32 legacy.
 
 ## Cấp địa chỉ: `assign_address`
 

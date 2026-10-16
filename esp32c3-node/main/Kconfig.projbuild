@@ -1,20 +1,73 @@
 menu "RS485 sensor node"
+choice NODE_SENSOR
+    prompt "Node sensor"
+    default NODE_SENSOR_ZS03
+config NODE_SENSOR_ZE03
+    bool "ZE03 H2S / NH3 (UART)"
+config NODE_SENSOR_WPCH01
+    bool "WPCH01 water pressure (I2C, protocol required)"
+config NODE_SENSOR_ZS03
+    bool "ZS03 temperature / humidity (single wire)"
+endchoice
 config NODE_SENSOR_TYPE
-    int "Sensor family: 0 unknown, 1 gas, 2 temperature/humidity, 3 CH3"
-    range 0 3
-    default 0
+    int
+    default 1 if NODE_SENSOR_ZE03
+    default 4 if NODE_SENSOR_WPCH01
+    default 2
+config NODE_ZE03_H2S_RX
+    int "ZE03 H2S TXD -> node RX GPIO (UART0)"
+    range 0 21
+    default 20
+    depends on NODE_SENSOR_ZE03
+config NODE_ZE03_H2S_TX
+    int "Node TX GPIO -> ZE03 H2S RXD (UART0)"
+    range 0 21
+    default 21
+    depends on NODE_SENSOR_ZE03
+config NODE_ZE03_NH3_RX
+    int "ZE03 NH3 TXD -> node RX GPIO (UART1)"
+    range 0 21
+    default 4
+    depends on NODE_SENSOR_ZE03
+config NODE_ZE03_NH3_TX
+    int "Node TX GPIO -> ZE03 NH3 RXD (UART1)"
+    range 0 21
+    default 5
+    depends on NODE_SENSOR_ZE03
+config NODE_RS485_SOFT
+    bool
+    default y if NODE_SENSOR_ZE03
+    default n
+    help
+        ZE03 uses both hardware UARTs. RS485 receives timestamped GPIO edges
+        and transmits 8N1 using RMT, keeping RX=6/TX=7 and the existing protocol.
+config NODE_ZS03_GPIO
+    int "ZS03 DATA GPIO"
+    range 0 21
+    default 4
+    depends on NODE_SENSOR_ZS03
+config NODE_I2C_SDA
+    int "WPCH01 SDA GPIO"
+    range 0 21
+    default 4
+    depends on NODE_SENSOR_WPCH01
+config NODE_I2C_SCL
+    int "WPCH01 SCL GPIO"
+    range 0 21
+    default 5
+    depends on NODE_SENSOR_WPCH01
 config NODE_UART_TX
     int "RS485 TX GPIO"
     range 0 21
-    default 4
+    default 7
 config NODE_UART_RX
     int "RS485 RX GPIO"
     range 0 21
-    default 5
+    default 6
 config NODE_UART_DE
     int "RS485 DE + /RE GPIO"
     range 0 21
-    default 6
+    default 10
 config NODE_RESET_GPIO
     int "Active-low factory reset button GPIO"
     range 0 21

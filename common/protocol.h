@@ -15,6 +15,25 @@
 #define MODBUS_SENSOR_GAS 1u
 #define MODBUS_SENSOR_TEMPERATURE_HUMIDITY 2u
 #define MODBUS_SENSOR_CH3 3u
+#define MODBUS_SENSOR_PRESSURE 4u
+/* ESP32 digital sensors extend the legacy register map, preserving 0..12.
+ * Values are valid only when their bit in register 14 is set. */
+#define DIGITAL_REGISTER_COUNT 21u
+#define DIGITAL_SCHEMA_REGISTER 13u
+#define DIGITAL_SCHEMA_V1 0x0101u
+#define DIGITAL_VALID_REGISTER 14u
+#define DIGITAL_H2S_REGISTER 15u /* ppm * 100 */
+#define DIGITAL_NH3_REGISTER 16u /* ppm * 100 */
+#define DIGITAL_PRESSURE_REGISTER 17u /* uint32 Pa, high word first */
+#define DIGITAL_TEMPERATURE_REGISTER 19u /* signed int16 degrees C * 10 */
+#define DIGITAL_HUMIDITY_REGISTER 20u /* %RH * 10 */
+#define SENSOR_VALID_H2S 0x01u
+#define SENSOR_VALID_NH3 0x02u
+#define SENSOR_VALID_PRESSURE 0x04u
+#define SENSOR_VALID_TEMPERATURE 0x08u
+#define SENSOR_VALID_HUMIDITY 0x10u
+#define SENSOR_WARMING_UP 0x4000u
+#define SENSOR_PROTOCOL_UNAVAILABLE 0x8000u
 #ifndef NODE_SENSOR_TYPE
 #define NODE_SENSOR_TYPE MODBUS_SENSOR_UNKNOWN
 #endif

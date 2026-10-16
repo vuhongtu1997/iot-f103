@@ -20,7 +20,31 @@ The gateway scans once after startup, then polls registered nodes every five sec
 
 `scan` and `discover` only read assigned IDs; neither grants new addresses. No prefix discovery or special address-247 multicast is implemented. To return a configured node to its initial unconfigured state, hold its PB12-to-GND factory-reset button for at least 5 seconds. The node invalidates and erases both address configuration pages, then restarts with address 0. Firmware and compile-time sensor type are retained. No remote reset command is implemented.
 
-On ESP32-C3 the gateway uses UART1 at 38400 8N1 with TX=GPIO4, RX=GPIO5, and DE/RE=GPIO6. These GPIOs are shared with external JTAG on common C3 modules. This app build disables the old BLE device protocol, Ethernet, and external DS1307 RTC. Wi-Fi is the network transport and SNTP is the time source. UDP discovery and Wi-Fi provisioning use port 8181 and a fallback setup AP; see [UDP_WIFI.md](./UDP_WIFI.md) for requests and setup instructions.
+On ESP32-C3 the gateway uses UART1 at 38400 8N1 with TX=GPIO7, RX=GPIO6, and DE/RE=GPIO10. C3 ZS03/WPCH01 nodes use the same hardware UART assignment. The ZE03 node dedicates UART0 (RX20/TX21) to H2S and UART1 (RX4/TX5) to NH3; its RS485 uses GPIO-edge software RX and RMT TX on GPIO6/7, with DE/RE=GPIO10. The software decoder uses a 1.75 ms RTU frame gap and rejects intra-frame gaps over 750 us, framing errors and edge-buffer overflow. Physical timing under sensor/flash load still needs hardware validation. GPIO6/7 are shared with external JTAG on common C3 modules. This app build disables the old BLE device protocol, Ethernet, and external DS1307 RTC. Wi-Fi is the network transport and SNTP is the time source. UDP discovery and Wi-Fi provisioning use port 8181 and a fallback setup AP; see [UDP_WIFI.md](./UDP_WIFI.md) for requests and setup instructions.
+
+### ESP32-C3 digital sensor extension
+
+C3 node profiles are ZE03 H2S + NH3 (type 1), ZS03 temperature/humidity (type 2),
+and WPCH01 water pressure (type 4). Type 3 remains legacy CH3. Pressure child ID
+is `rs485-{uid}-water-pressure`, type `MODBUS_PRESSURE`, name `water_pressure`.
+Registers 0/1 are unused (`0xffff`) on digital nodes. Legacy STM32 behavior below
+is unchanged. The gateway identifies C3 nodes by UID prefix `C3NODE` and reads
+13-20 in a separate FC03 transaction, allowing older C3 firmware to reject it.
+
+Register 13 is schema `0x0101`; 14 contains validity bits H2S=1, NH3=2,
+pressure=4, temperature=8, humidity=16. Status flags 0x4000/0x8000 indicate
+warming up / missing protocol. Registers 15/16 hold H2S/NH3 in 0.01 ppm;
+17/18 are uint32 pressure in Pa (high word first); 19 is signed int16 temperature
+in 0.1 C; 20 is humidity in 0.1 %RH. Validity bits, rather than sentinel values,
+determine whether measurements are usable.
+
+Digital MQTT parent and child data use `h2s_ppm`, `nh3_ppm`, `temperature_c`,
+`humidity_rh`, or `pressure_pa`; unavailable/offline fields are `null`.
+Quality includes `ok`, `partial`, `sensor_error`, `warming_up`,
+`measurement_unavailable`, `configuration_required`, `bootloader`, `offline`.
+WPCH01 measurement decoding is pending its actual I2C protocol and pressure
+range; the profile initializes/probes I2C but returns no pressure measurement.
+See [node documentation](../esp32c3-node/README.md) for wiring and builds.
 
 ## FC03 registers (zero-based offsets)
 

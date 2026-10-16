@@ -6,6 +6,9 @@
 #define GPIO_NUM_0 0
 #define GPIO_NUM_2 2
 #define GPIO_NUM_5 5
+#define GPIO_NUM_6 6
+#define GPIO_NUM_7 7
+#define GPIO_NUM_10 10
 #define GPIO_NUM_12 12
 #define GPIO_NUM_13 13
 #define GPIO_NUM_14 14
@@ -33,13 +36,13 @@
 #endif
 
 #ifndef RS485_TX_PIN
-#define RS485_TX_PIN GPIO_NUM_4
+#define RS485_TX_PIN GPIO_NUM_7
 #endif
 
 #ifndef RS485_RX_PIN
-#define RS485_RX_PIN GPIO_NUM_5
+#define RS485_RX_PIN GPIO_NUM_6
 #endif
 
 #ifndef RS485_DE_PIN
-#define RS485_DE_PIN GPIO_NUM_6
+#define RS485_DE_PIN GPIO_NUM_10
 #endif

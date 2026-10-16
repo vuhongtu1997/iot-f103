@@ -3,9 +3,7 @@
 #include "sdkconfig.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "esp_adc/adc_oneshot.h"
-#include "esp_adc/adc_cali.h"
-#include "esp_adc/adc_cali_scheme.h"
+#include "soft_bus.h"
 #include "esp_mac.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -16,13 +14,22 @@
 #include "freertos/task.h"
 #include <string.h>
 
+#if !CONFIG_NODE_RS485_SOFT
 static QueueHandle_t events;
-static adc_oneshot_unit_handle_t adc;
-static adc_cali_handle_t calibration;
+#endif
 static uint32_t rx_frames, tx_frames, uart_errors;
 
 void board_init(void)
 {
+    ESP_ERROR_CHECK(CONFIG_NODE_UART_RX != CONFIG_NODE_UART_TX &&
+                    CONFIG_NODE_UART_DE != CONFIG_NODE_UART_RX &&
+                    CONFIG_NODE_UART_DE != CONFIG_NODE_UART_TX &&
+                    CONFIG_NODE_RESET_GPIO != CONFIG_NODE_UART_RX &&
+                    CONFIG_NODE_RESET_GPIO != CONFIG_NODE_UART_TX &&
+                    CONFIG_NODE_RESET_GPIO != CONFIG_NODE_UART_DE ? ESP_OK : ESP_ERR_INVALID_ARG);
+#if CONFIG_NODE_RS485_SOFT
+    soft_bus_init();
+#else
     const uart_config_t uart = {
         .baud_rate = BUS_BAUD, .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE, .stop_bits = UART_STOP_BITS_1,
@@ -36,25 +43,13 @@ void board_init(void)
     /* 4 symbols of silence delimit RTU frames; handle timeout events, not task timing. */
     ESP_ERROR_CHECK(uart_set_rx_timeout(UART_NUM_1, 4));
     uart_set_always_rx_timeout(UART_NUM_1, true);
+#endif
     const gpio_config_t button = {
         .pin_bit_mask = 1ULL << CONFIG_NODE_RESET_GPIO, .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE, .intr_type = GPIO_INTR_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&button));
-    const adc_oneshot_unit_init_cfg_t unit = {.unit_id = ADC_UNIT_1};
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit, &adc));
-    const adc_oneshot_chan_cfg_t channel = {
-        .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_12,
-    };
-    /* ADC1 channel 0 is GPIO0 on ESP32-C3. */
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc, ADC_CHANNEL_0, &channel));
-    const adc_cali_curve_fitting_config_t cal = {
-        .unit_id = ADC_UNIT_1, .chan = ADC_CHANNEL_0,
-        .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_12,
-    };
-    /* Missing calibration is reported as unknown mV, never a false 3.3V scale. */
-    if (adc_cali_create_scheme_curve_fitting(&cal, &calibration) != ESP_OK)
-        calibration = NULL;
+    sensors_init();
 }
 
 uint32_t millis(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
@@ -66,29 +61,24 @@ void board_uid(uint8_t out[12])
     memcpy(out, "C3NODE", 6);
     ESP_ERROR_CHECK(esp_efuse_mac_get_default(out + 6));
 }
-uint16_t sensor_raw(void)
-{
-    int raw;
-    return adc_oneshot_read(adc, ADC_CHANNEL_0, &raw) == ESP_OK ? raw : 0xffff;
-}
-uint16_t sensor_millivolts(uint16_t raw)
-{
-    int mv;
-    if (raw == 0xffff || !calibration ||
-        adc_cali_raw_to_voltage(calibration, raw, &mv) != ESP_OK || mv < 0)
-        return 0xffff;
-    return (uint16_t)mv;
-}
 int bus_receive(uint8_t *out, size_t cap)
 {
     static uint32_t last_status;
     const uint32_t now = millis();
     if (now - last_status >= 10000) {
         last_status = now;
+#if CONFIG_NODE_RS485_SOFT
+        uart_errors = soft_bus_errors();
+#endif
         ESP_LOGI("node", "Alive: address=%u rx_frames=%lu tx_frames=%lu uart_errors=%lu",
                  (unsigned)config_address(), (unsigned long)rx_frames,
                  (unsigned long)tx_frames, (unsigned long)uart_errors);
     }
+#if CONFIG_NODE_RS485_SOFT
+    int size = soft_bus_receive(out, cap);
+    if (size) rx_frames++;
+    return size;
+#else
     static uint8_t frame[FRAME_MAX];
     static size_t used;
     static int bad;
@@ -127,11 +117,16 @@ int bus_receive(uint8_t *out, size_t cap)
         }
     }
     return 0;
+#endif
 }
 void bus_send(const uint8_t *data, size_t len)
 {
+#if CONFIG_NODE_RS485_SOFT
+    soft_bus_send(data, len);
+#else
     const int written = uart_write_bytes(UART_NUM_1, data, len);
     ESP_ERROR_CHECK(written == (int)len ? ESP_OK : ESP_FAIL);
     ESP_ERROR_CHECK(uart_wait_tx_done(UART_NUM_1, pdMS_TO_TICKS(200)));
+#endif
     tx_frames++;
 }

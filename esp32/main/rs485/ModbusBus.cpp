@@ -23,6 +23,7 @@
 #include "DeviceModbusGas.h"
 #include "DeviceModbusTemperatureHumidity.h"
 #include "DeviceModbusCH3.h"
+#include "DeviceModbusPressure.h"
 #include "Gateway.h"
 #include "Log.h"
 
@@ -101,6 +102,10 @@ namespace
     case MODBUS_SENSOR_CH3:
       sensor = new DeviceModbusCH3(childId, name, uid, node.address,
                                    node.version, node.sensorType, &data);
+      break;
+    case MODBUS_SENSOR_PRESSURE:
+      sensor = new DeviceModbusPressure(childId, name, uid, node.address,
+                                       node.version, node.sensorType, &data);
       break;
     default:
       break;
@@ -485,7 +490,7 @@ namespace
       const uint16_t sensorType =
           static_cast<uint16_t>(sensorTypeResponse[3] << 8) |
           sensorTypeResponse[4];
-      if (sensorType > MODBUS_SENSOR_CH3)
+      if (sensorType > MODBUS_SENSOR_PRESSURE)
         return -1;
       node->sensorType = static_cast<uint8_t>(sensorType);
     }
@@ -511,7 +516,7 @@ namespace
       ModbusGetNodes(nodes);
       for (const ModbusNodeInfo &node : nodes)
       {
-        uint16_t registers[12]{};
+        uint16_t registers[DIGITAL_REGISTER_COUNT]{};
         const bool online = ModbusReadNode(node, registers);
         Gateway::getInstance()->PublishModbusTelemetry(node, registers, online);
       }
@@ -729,7 +734,7 @@ void ModbusGetNodes(std::vector<ModbusNodeInfo> &nodes)
   nodes.assign(registeredNodes, registeredNodes + registeredNodeCount);
 }
 
-bool ModbusReadNode(const ModbusNodeInfo &node, uint16_t registers[12])
+bool ModbusReadNode(const ModbusNodeInfo &node, uint16_t registers[DIGITAL_REGISTER_COUNT])
 {
   if (!registers)
     return false;
@@ -744,6 +749,21 @@ bool ModbusReadNode(const ModbusNodeInfo &node, uint16_t registers[12])
   for (size_t i = 0; i < 12; ++i)
     registers[i] = static_cast<uint16_t>(response[3 + 2 * i] << 8) |
                    response[4 + 2 * i];
+  /* Probe the extension separately: old C3 firmware returns illegal address.
+   * Keep the identity/online state usable when a sensor extension is absent. */
+  for (size_t i = 12; i < DIGITAL_REGISTER_COUNT; ++i) registers[i] = 0;
+  if (memcmp(node.uid, "C3NODE", 6) == 0)
+  {
+    const uint8_t extensionRequest[4] = {0, DIGITAL_SCHEMA_REGISTER, 0,
+        DIGITAL_REGISTER_COUNT - DIGITAL_SCHEMA_REGISTER};
+    const int extensionLength = BusExchange(node.address, 3, extensionRequest,
+        sizeof(extensionRequest), response, sizeof(response), 150, nullptr);
+    constexpr size_t words = DIGITAL_REGISTER_COUNT - DIGITAL_SCHEMA_REGISTER;
+    if (extensionLength == 5 + 2 * words && response[2] == 2 * words)
+      for (size_t i = 0; i < words; ++i)
+        registers[DIGITAL_SCHEMA_REGISTER + i] =
+            static_cast<uint16_t>(response[3 + 2 * i] << 8) | response[4 + 2 * i];
+  }
   for (size_t i = 0; i < 6; ++i)
   {
     uint16_t uidWord = static_cast<uint16_t>(node.uid[2 * i] << 8) |

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <vector>
+#include "protocol.h"
 
 struct ModbusNodeInfo
 {
@@ -16,4 +17,4 @@ bool ModbusBusInit();
 bool ModbusDiscoverNodes();
 int ModbusAssignAddress(uint8_t address, ModbusNodeInfo *assigned);
 void ModbusGetNodes(std::vector<ModbusNodeInfo> &nodes);
-bool ModbusReadNode(const ModbusNodeInfo &node, uint16_t registers[12]);
+bool ModbusReadNode(const ModbusNodeInfo &node, uint16_t registers[DIGITAL_REGISTER_COUNT]);

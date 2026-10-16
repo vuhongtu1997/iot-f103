@@ -12,8 +12,13 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     board_init();
     const uint8_t address = config_address();
-    ESP_LOGI("node", "Ready: address=%u sensor_type=%d UART1 TX=GPIO%d RX=GPIO%d baud=%d",
+    ESP_LOGI("node", "Ready: address=%u sensor_type=%d RS485=%s TX=GPIO%d RX=GPIO%d baud=%d",
              (unsigned)address, CONFIG_NODE_SENSOR_TYPE,
+#if CONFIG_NODE_RS485_SOFT
+             "software GPIO/RMT",
+#else
+             "UART1",
+#endif
              CONFIG_NODE_UART_TX, CONFIG_NODE_UART_RX, BUS_BAUD);
     if (!address)
         ESP_LOGI("node", "Unconfigured: waiting for master assign_address; scan does not assign an address");

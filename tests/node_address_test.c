@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdio.h>
 static jmp_buf done;
-static uint8_t request[32], address, last_response[32];
+static uint8_t request[32], address, last_response[FRAME_MAX];
 static size_t last_response_size;
 static int consumed, writes, replies;
 uint8_t config_address(void) { return address; }
@@ -36,6 +36,15 @@ void bus_send(const uint8_t *p, size_t n)
     replies++;
 }
 uint16_t sensor_raw(void) { return 123; }
+#ifdef NODE_DIGITAL_SENSORS
+void sensor_registers(uint16_t *regs, int boot_mode)
+{
+    regs[0] = regs[1] = 0xffff;
+    regs[DIGITAL_SCHEMA_REGISTER] = DIGITAL_SCHEMA_V1;
+    regs[DIGITAL_VALID_REGISTER] = boot_mode ? 0 : SENSOR_VALID_TEMPERATURE;
+    regs[DIGITAL_TEMPERATURE_REGISTER] = (uint16_t)(int16_t)-180;
+}
+#endif
 int stage_begin(const uint8_t p[16])
 {
     (void)p;
@@ -94,11 +103,32 @@ int main(void)
     address = 5;
     request[0] = 5;
     request[1] = 3;
-    put16(request + 2, MODBUS_SENSOR_TYPE_REGISTER);
-    put16(request + 4, 1);
+    request[2] = request[4] = 0; /* FC03 offsets/counts are big endian. */
+    request[3] = MODBUS_SENSOR_TYPE_REGISTER;
+    request[5] = 1;
     run(0);
     assert(last_response_size == 7 && last_response[2] == 2);
     assert((((unsigned)last_response[3] << 8) | last_response[4]) == NODE_SENSOR_TYPE);
+#ifdef NODE_DIGITAL_SENSORS
+    request[3] = DIGITAL_SCHEMA_REGISTER;
+    request[5] = DIGITAL_REGISTER_COUNT - DIGITAL_SCHEMA_REGISTER;
+    run(0);
+    assert(last_response_size == 21 && last_response[2] == 16);
+    assert(last_response[3] == 1 && last_response[4] == 1); /* schema */
+    assert(last_response[5] == 0 && last_response[6] == SENSOR_VALID_TEMPERATURE);
+    assert(last_response[15] == 0xff && last_response[16] == 0x4c); /* -18 C */
+    run(1);
+    assert(last_response[5] == 0 && last_response[6] == 0); /* boot invalid */
+    request[3] = DIGITAL_REGISTER_COUNT;
+    request[5] = 1;
+    run(0);
+    assert(last_response_size == 5 && last_response[1] == 0x83 && last_response[2] == 2);
+#else
+    request[3] = DIGITAL_SCHEMA_REGISTER;
+    request[5] = 1;
+    run(0);
+    assert(last_response_size == 5 && last_response[1] == 0x83 && last_response[2] == 2);
+#endif
     puts("PASS: real STM32 parser, unconfigured-only address write, bootloader support, sensor type register, invalid IDs, broadcast silence");
     return 0;
 }

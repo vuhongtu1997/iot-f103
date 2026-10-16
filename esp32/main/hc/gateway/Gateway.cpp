@@ -236,8 +236,49 @@ int Gateway::PushGatewayStatus()
 }
 
 int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
-                                    const uint16_t registers[12], bool online)
+                                    const uint16_t registers[DIGITAL_REGISTER_COUNT], bool online)
 {
+  const bool digitalNode = memcmp(node.uid, "C3NODE", 6) == 0;
+  const bool digital = online &&
+      registers[DIGITAL_SCHEMA_REGISTER] == DIGITAL_SCHEMA_V1;
+  const uint16_t valid = digital && !registers[4] ? registers[DIGITAL_VALID_REGISTER] : 0;
+  const uint16_t expected = node.sensorType == MODBUS_SENSOR_GAS
+      ? SENSOR_VALID_H2S | SENSOR_VALID_NH3
+      : node.sensorType == MODBUS_SENSOR_PRESSURE ? SENSOR_VALID_PRESSURE
+      : node.sensorType == MODBUS_SENSOR_TEMPERATURE_HUMIDITY
+          ? SENSOR_VALID_TEMPERATURE | SENSOR_VALID_HUMIDITY : 0;
+  const char *digitalQuality = !digital ? "measurement_unavailable"
+      : registers[4] ? "bootloader"
+      : valid & SENSOR_PROTOCOL_UNAVAILABLE ? "configuration_required"
+      : valid & SENSOR_WARMING_UP ? "warming_up"
+      : (valid & expected) == expected && expected ? "ok"
+      : (valid & expected) ? "partial" : "sensor_error";
+  Json::Value measurements(Json::objectValue);
+  if (digitalNode)
+  {
+    if (node.sensorType == MODBUS_SENSOR_GAS)
+    {
+      measurements["h2s_ppm"] = valid & SENSOR_VALID_H2S
+          ? Json::Value(registers[DIGITAL_H2S_REGISTER] / 100.0) : Json::Value();
+      measurements["nh3_ppm"] = valid & SENSOR_VALID_NH3
+          ? Json::Value(registers[DIGITAL_NH3_REGISTER] / 100.0) : Json::Value();
+    }
+    else if (node.sensorType == MODBUS_SENSOR_TEMPERATURE_HUMIDITY)
+    {
+      measurements["temperature_c"] = valid & SENSOR_VALID_TEMPERATURE
+          ? Json::Value(static_cast<int16_t>(registers[DIGITAL_TEMPERATURE_REGISTER]) / 10.0)
+          : Json::Value();
+      measurements["humidity_rh"] = valid & SENSOR_VALID_HUMIDITY
+          ? Json::Value(registers[DIGITAL_HUMIDITY_REGISTER] / 10.0) : Json::Value();
+    }
+    else if (node.sensorType == MODBUS_SENSOR_PRESSURE)
+    {
+      measurements["pressure_pa"] = valid & SENSOR_VALID_PRESSURE
+          ? Json::Value(static_cast<Json::UInt64>(
+              (static_cast<uint32_t>(registers[DIGITAL_PRESSURE_REGISTER]) << 16) |
+              registers[DIGITAL_PRESSURE_REGISTER + 1])) : Json::Value();
+    }
+  }
   char uid[25];
   bool hasUid = false;
   for (size_t i = 0; i < sizeof(node.uid); ++i)
@@ -265,11 +306,15 @@ int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
     device["data"]["version"] = static_cast<Json::UInt64>(
         (static_cast<uint32_t>(registers[2]) << 16) | registers[3]);
     device["data"]["mode"] = registers[4];
-    device["data"]["adc_raw"] = registers[0];
-    device["data"]["millivolts"] = registers[1];
+    if (!digitalNode)
+    {
+      device["data"]["adc_raw"] = registers[0];
+      device["data"]["millivolts"] = registers[1];
+    }
     device["data"]["quality"] = registers[4]             ? "bootloader"
                                 : registers[0] == 0xffff ? "sensor_error"
                                                          : "ok";
+    if (digitalNode) device["data"]["quality"] = digitalQuality;
   }
   else
   {
@@ -277,6 +322,8 @@ int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
     device["data"]["mode"] = node.mode;
     device["data"]["quality"] = "offline";
   }
+  for (const auto &key : measurements.getMemberNames())
+    device["data"][key] = measurements[key];
 
   Json::Value update;
   update["device"] = Json::arrayValue;
@@ -296,7 +343,13 @@ int Gateway::PublishModbusTelemetry(const ModbusNodeInfo &node,
     child["data"]["sensor_type_name"] =
         DeviceModbus::GetSensorName(node.sensorType);
     child["data"]["stt"] = online ? 1 : 0;
-    if (online)
+    if (digitalNode)
+    {
+      child["data"]["quality"] = online ? digitalQuality : "offline";
+      for (const auto &key : measurements.getMemberNames())
+        child["data"][key] = measurements[key];
+    }
+    else if (online)
     {
       child["data"]["quality"] =
           node.sensorType == MODBUS_SENSOR_TEMPERATURE_HUMIDITY

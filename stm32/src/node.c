@@ -1,8 +1,13 @@
 #include "node.h"
 #include "board.h"
 #include <string.h>
-#if NODE_SENSOR_TYPE < MODBUS_SENSOR_UNKNOWN || NODE_SENSOR_TYPE > MODBUS_SENSOR_CH3
-#error "SENSOR_TYPE must be 0 (unknown), 1 (gas), 2 (temperature/humidity), or 3 (CH3)"
+#if NODE_SENSOR_TYPE < MODBUS_SENSOR_UNKNOWN || NODE_SENSOR_TYPE > MODBUS_SENSOR_PRESSURE
+#error "Invalid SENSOR_TYPE"
+#endif
+#ifdef NODE_DIGITAL_SENSORS
+#define NODE_REGISTER_COUNT DIGITAL_REGISTER_COUNT
+#else
+#define NODE_REGISTER_COUNT MODBUS_REGISTER_COUNT
 #endif
 static void reply(uint8_t *b, size_t n)
 {
@@ -61,19 +66,25 @@ void node_run(int boot_mode)
         if (rx[1] == 3 && n == 6)
         {
             unsigned start = (unsigned)rx[2] << 8 | rx[3], count = (unsigned)rx[4] << 8 | rx[5];
-            if (!count || start + count > MODBUS_REGISTER_COUNT)
+            if (!count || start + count > NODE_REGISTER_COUNT)
             {
                 tx[1] |= 0x80;
                 tx[2] = 2;
                 reply(tx, 3);
                 continue;
             }
-            uint16_t raw = boot_mode ? 0xffff : sensor_raw(), regs[MODBUS_REGISTER_COUNT];
+            uint16_t regs[NODE_REGISTER_COUNT];
+#ifdef NODE_DIGITAL_SENSORS
+            memset(regs, 0xff, sizeof regs);
+            sensor_registers(regs, boot_mode);
+#else
+            uint16_t raw = boot_mode ? 0xffff : sensor_raw();
             regs[0] = raw;
 #ifdef NODE_CALIBRATED_ADC
             regs[1] = sensor_millivolts(raw);
 #else
             regs[1] = raw == 0xffff ? 0xffff : (uint16_t)((uint32_t)raw * 3300 / 4095);
+#endif
 #endif
             regs[2] = (uint16_t)(FW_VERSION >> 16);
             regs[3] = (uint16_t)FW_VERSION;

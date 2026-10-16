@@ -12,9 +12,9 @@ This ESP-IDF application keeps the existing gateway/cloud MQTT protocol and adds
 - Scans Modbus addresses 1–247 at startup and polls registered nodes every five seconds.
 - Accepts MQTT RPC commands `scan`, `discover` and `assign_address`.
 - Persists an address reservation before the single broadcast FC06 assignment, then stores the UID after read-back confirmation.
-- Reads the node's FC03 sensor type after address assignment and persists a typed sensor child (gas, temperature/humidity, or CH3) alongside its Modbus node in SQLite.
+- Reads the node's FC03 sensor type after address assignment and persists a typed sensor child (gas, temperature/humidity, water pressure, or legacy CH3) alongside its Modbus node in SQLite.
 - Publishes the node and recognized child status through the gateway's existing `deviceUpdate` MQTT command.
-- Reports ADC raw values and millivolts for gas/CH3 nodes. Temperature/humidity is identified, but needs a matching sensor driver before measured values can be reported.
+- ESP32-C3 nodes measure ZE03 H2S + NH3 or ZS03 temperature/humidity. WPCH01 has an I2C diagnostic bus and typed telemetry, but pressure decoding still requires its unpublished protocol. See [node wiring and profiles](./esp32c3-node/README.md). Legacy STM32 gas/CH3 nodes retain ADC telemetry.
 
 The gateway does **not** use the standalone `main` branch's `iot/{gateway}/commands` topics, `job_id` command format, queueing, or remote STM32 OTA integration. See [docs/PROTOCOL.md](./docs/PROTOCOL.md) for the current MQTT RPC and Modbus details.
 
@@ -26,9 +26,9 @@ Use one 3.3 V RS485 transceiver (for example, MAX3485) at each processor. Do not
 
 | ESP32-C3 | Transceiver pin | Function |
 |---|---|---|
-| GPIO4 (UART1 TX) | DI | Data sent by the ESP32 |
-| GPIO5 (UART1 RX) | RO | Data received by the ESP32 |
-| GPIO6 | DE + /RE | Transmit/receive direction |
+| GPIO7 (UART1 TX) | DI | Data sent by the ESP32 |
+| GPIO6 (UART1 RX) | RO | Data received by the ESP32 |
+| GPIO10 | DE + /RE | Transmit/receive direction |
 | 3V3 | VCC | 3.3 V supply |
 | GND | GND | Common reference |
 
@@ -46,9 +46,9 @@ Use one 3.3 V RS485 transceiver (for example, MAX3485) at each processor. Do not
 
 ```text
 ESP32-C3                 MAX3485 #1        RS485 bus        MAX3485 #2                 STM32F103
-GPIO4  (TX) ------------ DI                                      DI ---------------- PA9  (TX)
-GPIO5  (RX) <----------- RO                                      RO ---------------> PA10 (RX)
-GPIO6       ------------ DE + /RE                        DE + /RE ------------------- PA8
+GPIO7  (TX) ------------ DI                                      DI ---------------- PA9  (TX)
+GPIO6  (RX) <----------- RO                                      RO ---------------> PA10 (RX)
+GPIO10      ------------ DE + /RE                        DE + /RE ------------------- PA8
 3V3         ------------ VCC                                     VCC ---------------- 3.3V
 GND         ------------ GND -------- GND/common reference ------ GND ---------------- GND
                                       A -------------------------- A
@@ -80,9 +80,9 @@ ESP32-C3 GPIO9 ---- push button ---- GND
 
 GPIO9 is a strapping pin on ESP32-C3. Do not hold the button while applying power or resetting the module unless bootloader/download mode is intended. Verify the strapping requirements for the exact ESP32-C3 board.
 
-The ESP32 build does not use an external RTC or Ethernet PHY. GPIO8/GPIO10 are no longer reserved for DS1307 I2C, and Ethernet MDC/MDIO/reset/clock pins are no longer configured. Time-dependent rules become available only after SNTP synchronization over Wi-Fi.
+The ESP32 build does not use an external RTC or Ethernet PHY. GPIO10 now controls RS485 DE/RE. Ethernet MDC/MDIO/reset/clock pins are no longer configured. Time-dependent rules become available only after SNTP synchronization over Wi-Fi.
 
-Verify all GPIO assignments against the exact board schematic. In particular, GPIO4/5/6 may conflict with external JTAG on some modules.
+Verify all GPIO assignments against the exact board schematic. GPIO6/7 may conflict with external JTAG on some modules.
 
 Use a single RS485 trunk with short stubs. Fit 120 Ω termination only at the two physical ends and use biasing at one location. Do not fit a 120 Ω resistor at every STM32 node. For long or electrically noisy installations, add suitable isolation and surge protection.
 

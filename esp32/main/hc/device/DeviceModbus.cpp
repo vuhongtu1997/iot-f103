@@ -132,6 +132,8 @@ const char *DeviceModbus::GetSensorName(uint8_t sensorType)
     return "temperature_humidity";
   case MODBUS_SENSOR_CH3:
     return "ch3";
+  case MODBUS_SENSOR_PRESSURE:
+    return "water_pressure";
   default:
     return "unknown";
   }
@@ -147,6 +149,8 @@ const char *DeviceModbus::GetSensorDeviceType(uint8_t sensorType)
     return TEMPERATURE_HUMIDITY_TYPE;
   case MODBUS_SENSOR_CH3:
     return CH3_TYPE;
+  case MODBUS_SENSOR_PRESSURE:
+    return PRESSURE_TYPE;
   default:
     return nullptr;
   }
@@ -162,6 +166,8 @@ const char *DeviceModbus::GetSensorIdSuffix(uint8_t sensorType)
     return "temperature-humidity";
   case MODBUS_SENSOR_CH3:
     return "ch3";
+  case MODBUS_SENSOR_PRESSURE:
+    return "water-pressure";
   default:
     return nullptr;
   }

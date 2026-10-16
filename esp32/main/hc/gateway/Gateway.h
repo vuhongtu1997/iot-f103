@@ -228,5 +228,5 @@ public:
   int PushDeviceOnlineState(Device *device, bool isOnline);
   int PushGatewayStatus();
   int PublishModbusTelemetry(const ModbusNodeInfo &node,
-                             const uint16_t registers[12], bool online);
+                                    const uint16_t registers[DIGITAL_REGISTER_COUNT], bool online);
 };
