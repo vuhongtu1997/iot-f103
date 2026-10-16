@@ -41,8 +41,7 @@ void initialize_sntp(bool wait_network)
 
 	if (!wait_network)
 	{
-		LOGI("Skip SNTP because network is not ready");
-		return;
+		LOGI("Starting SNTP; synchronization will follow WiFi provisioning");
 	}
 
 	LOGI("Initializing SNTP");
@@ -55,7 +54,7 @@ void initialize_sntp(bool wait_network)
 
 	sntp_init();
 
-	while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < SNTP_WAIT_UPDATE_TIME)
+	while (wait_network && sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < SNTP_WAIT_UPDATE_TIME)
 	{
 		LOGI("Waiting for system time to be set... (retry %d)", retry);
 		vTaskDelay(1000 / portTICK_PERIOD_MS);

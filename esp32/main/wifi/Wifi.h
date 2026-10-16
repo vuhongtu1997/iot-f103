@@ -16,6 +16,8 @@
 namespace Wifi
 {
     void Init();
+    bool IsProvisioningPeer(uint32_t ipv4);
+    bool IsProvisioningActive();
 
     /**
      * @brief Chờ kết nối Wi-Fi hoàn tất.

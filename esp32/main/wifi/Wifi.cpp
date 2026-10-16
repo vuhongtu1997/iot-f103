@@ -23,18 +23,64 @@
 #include "lwip/sys.h"
 #include <atomic>
 #include <vector>
+#include <mutex>
+#include <algorithm>
 
 #define TAG "WIFI"
-static uint32_t retry_count = 0;
+static std::atomic<uint32_t> retry_count(0);
 
 using namespace std;
 
-static bool isWaitConnect = false;
+static atomic<bool> isWaitConnect(false);
 static atomic<bool> networkResetInProgress(false);
 static atomic<bool> suppressWifiReconnect(false);
 static TaskHandle_t networkMonitorTaskHandle = nullptr;
 static atomic<uint32_t> networkRevision(0);
 static atomic<int> lastWifiDisconnectReason(0);
+static atomic<bool> provisioningActive(false);
+static std::mutex wifiConfigMutex;
+static esp_netif_t *apNetif = nullptr;
+
+static bool setup_password_valid()
+{
+  const size_t length = strlen(CONFIG_GATEWAY_SETUP_PASSWORD);
+  return length >= 8 && length <= 63;
+}
+
+static const char *setup_password()
+{
+  // A bad menuconfig value must not prevent the gateway from booting.
+  return setup_password_valid() ? CONFIG_GATEWAY_SETUP_PASSWORD : "configureme";
+}
+
+bool Wifi::IsProvisioningActive() { return provisioningActive.load(); }
+bool Wifi::IsProvisioningPeer(uint32_t ipv4)
+{
+  esp_netif_ip_info_t ip{};
+  return provisioningActive.load() && apNetif &&
+         esp_netif_get_ip_info(apNetif, &ip) == ESP_OK &&
+         (ipv4 & ip.netmask.addr) == (ip.ip.addr & ip.netmask.addr);
+}
+
+static void start_provisioning_ap()
+{
+  std::lock_guard<std::mutex> lock(wifiConfigMutex);
+  if (provisioningActive.load() || networkResetInProgress.load()) return;
+  wifi_config_t ap{};
+  const std::string name = "RD_MH_" + Wifi::GetMacAddress().substr(6);
+  memcpy(ap.ap.ssid, name.data(), name.size());
+  ap.ap.ssid_len = name.size();
+  const char *password = setup_password();
+  memcpy(ap.ap.password, password, strlen(password));
+  ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+  ap.ap.max_connection = 2;
+  ap.ap.channel = 1;
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
+  ESP_ERROR_CHECK(esp_wifi_start());
+  provisioningActive.store(true);
+  LOGI("WiFi setup AP: %s, UDP port 8181", name.c_str());
+}
 
 const int WIFI_CONNECTED_EVENT = BIT0;
 static EventGroupHandle_t wifi_event_group;
@@ -98,7 +144,7 @@ static bool apply_sta_config_and_start(wifi_config_t wifi_config)
   // leave the connecting state before replacing the STA configuration.
   vTaskDelay(pdMS_TO_TICKS(100));
 
-  err = esp_wifi_set_mode(WIFI_MODE_STA);
+  err = esp_wifi_set_mode(provisioningActive.load() ? WIFI_MODE_APSTA : WIFI_MODE_STA);
   if (err != ESP_OK)
   {
     LOGE("esp_wifi_set_mode failed: %s", esp_err_to_name(err));
@@ -145,19 +191,21 @@ static bool apply_sta_config_and_start(wifi_config_t wifi_config)
 
 static bool start_configured_wifi()
 {
+  std::lock_guard<std::mutex> lock(wifiConfigMutex);
   wifi_config_t wifi_config = {};
   esp_err_t ret = esp_wifi_get_config(WIFI_IF_STA, &wifi_config);
   if (ret == ESP_OK &&
       is_valid_wifi_ssid(reinterpret_cast<char *>(wifi_config.sta.ssid)))
   {
     LOGI("WiFi config found in NVS");
-    LOGI("SSID: %s", wifi_config.sta.ssid);
+    LOGI("SSID: %.32s", wifi_config.sta.ssid);
     return apply_sta_config_and_start(wifi_config);
   }
 
   const string storedSsid = Config::getInstance()->GetWifiSsid();
   const string storedPassword = Config::getInstance()->GetWifiPassword();
-  if (!is_valid_wifi_ssid(storedSsid.c_str()))
+  if (storedSsid.empty() || storedSsid.size() > 32 ||
+      (!storedPassword.empty() && (storedPassword.size() < 8 || storedPassword.size() > 63)))
   {
     LOGW("No WiFi fallback configured");
     isWaitConnect = false;
@@ -166,10 +214,8 @@ static bool start_configured_wifi()
 
   LOGI("WiFi config found in app NVS");
   LOGI("SSID: %s", storedSsid.c_str());
-  strncpy(reinterpret_cast<char *>(wifi_config.sta.ssid), storedSsid.c_str(),
-          sizeof(wifi_config.sta.ssid) - 1);
-  strncpy(reinterpret_cast<char *>(wifi_config.sta.password),
-          storedPassword.c_str(), sizeof(wifi_config.sta.password) - 1);
+  memcpy(wifi_config.sta.ssid, storedSsid.data(), storedSsid.size());
+  memcpy(wifi_config.sta.password, storedPassword.data(), storedPassword.size());
   if (!storedPassword.empty())
   {
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
@@ -183,6 +229,8 @@ static void network_monitor_task(void *)
   constexpr TickType_t RETRY_INTERVAL = pdMS_TO_TICKS(30000);
   TickType_t lastWifiRetry = 0;
   NetworkType previousType = get_network_type();
+  TickType_t offlineSince = xTaskGetTickCount();
+  TickType_t connectedSince = 0;
 
   while (true)
   {
@@ -204,6 +252,9 @@ static void network_monitor_task(void *)
 
     if (currentType == NETWORK_NONE)
     {
+      connectedSince = 0;
+      if (now - offlineSince >= RETRY_INTERVAL)
+        start_provisioning_ap();
       if (lastWifiRetry == 0 || now - lastWifiRetry >= RETRY_INTERVAL)
       {
         lastWifiRetry = now;
@@ -215,6 +266,15 @@ static void network_monitor_task(void *)
     else
     {
       lastWifiRetry = 0;
+      offlineSince = now;
+      if (!connectedSince) connectedSince = now;
+      // Leave time for the UDP success response before retiring the setup AP.
+      if (provisioningActive.load() && now - connectedSince >= RETRY_INTERVAL)
+      {
+        std::lock_guard<std::mutex> lock(wifiConfigMutex);
+        if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK)
+          provisioningActive.store(false);
+      }
     }
 
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -241,13 +301,13 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     {
       wifi_config_t sta_cfg = {0};
       ESP_ERROR_CHECK(esp_wifi_get_config(WIFI_IF_STA, &sta_cfg));
-      ESP_LOGW(TAG, "SSID: %s", sta_cfg.sta.ssid);
+      ESP_LOGW(TAG, "SSID: %.32s", sta_cfg.sta.ssid);
       if (suppressWifiReconnect.load())
       {
         LOGI("Skip automatic STA connect while updating WiFi configuration");
         break;
       }
-      esp_wifi_connect();
+      if (sta_cfg.sta.ssid[0]) esp_wifi_connect();
       break;
     }
     case WIFI_EVENT_STA_DISCONNECTED:
@@ -268,9 +328,13 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         break;
       }
 
+      wifi_config_t current{};
+      if (esp_wifi_get_config(WIFI_IF_STA, &current) != ESP_OK || !current.sta.ssid[0])
+        break;
+
       retry_count++;
       ESP_LOGW(TAG, "Retry STA connect (attempt %lu)",
-               static_cast<unsigned long>(retry_count));
+               static_cast<unsigned long>(retry_count.load()));
       esp_err_t connectErr = esp_wifi_connect();
       if (connectErr != ESP_OK && connectErr != ESP_ERR_WIFI_CONN)
       {
@@ -297,33 +361,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
 
 bool Wifi::ConnectToWifi(const std::string &ssid, const std::string &pass)
 {
-  if (!is_valid_wifi_ssid(ssid.c_str()))
-  {
-    LOGW("ConnectToWifi: invalid ssid");
-    return false;
-  }
-
-  wifi_config_t wifi_config = {};
-  memcpy(wifi_config.sta.ssid, ssid.c_str(), ssid.length());
-  memcpy(wifi_config.sta.password, pass.c_str(), pass.length());
-
-  retry_count = 0;
-  isWaitConnect = true;
-  suppressWifiReconnect.store(false);
-
-  esp_wifi_disconnect();
-  esp_wifi_stop();
-
-  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-  ESP_ERROR_CHECK(esp_wifi_start());
-  ESP_ERROR_CHECK(esp_wifi_connect());
-
-  LOGI("ConnectToWifi: start connect to ssid: %s", ssid.c_str());
-  return true;
+  return SetStaCredentials(ssid, pass);
 }
 
-bool Wifi::ScanWifi(Json::Value &networks)
+static bool scan_wifi_networks(Json::Value &networks)
 {
   networks = Json::arrayValue;
 
@@ -343,6 +384,7 @@ bool Wifi::ScanWifi(Json::Value &networks)
     return false;
   }
 
+  apCount = std::min<uint16_t>(apCount, 32);
   std::vector<wifi_ap_record_t> records(apCount);
   if (apCount > 0)
   {
@@ -367,6 +409,25 @@ bool Wifi::ScanWifi(Json::Value &networks)
   return true;
 }
 
+bool Wifi::ScanWifi(Json::Value &networks)
+{
+  std::lock_guard<std::mutex> lock(wifiConfigMutex);
+  const bool resume = !is_wifi_connected();
+  if (resume) {
+    suppressWifiReconnect.store(true);
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  const bool ok = scan_wifi_networks(networks);
+  if (resume) {
+    suppressWifiReconnect.store(false);
+    wifi_config_t current{};
+    if (esp_wifi_get_config(WIFI_IF_STA, &current) == ESP_OK && current.sta.ssid[0])
+      esp_wifi_connect();
+  }
+  return ok;
+}
+
 void Wifi::Init()
 {
   ESP_ERROR_CHECK(esp_netif_init());
@@ -380,10 +441,14 @@ void Wifi::Init()
                                              &event_handler, NULL));
 
   esp_netif_create_default_wifi_sta();
+  apNetif = esp_netif_create_default_wifi_ap();
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+  ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
+  if (!setup_password_valid())
+    LOGW("Setup AP password must contain 8-63 bytes; using default setup password");
 
-  start_configured_wifi();
+  if (!start_configured_wifi()) start_provisioning_ap();
   start_network_monitor();
 }
 
@@ -446,21 +511,13 @@ string Wifi::GetMacAddress()
 
 string Wifi::GetIP()
 {
-  char ip[32] = "10.10.10.1";
-  esp_netif_t *netif = NULL;
-  esp_netif_ip_info_t ip_info;
-  for (int i = 0; i < esp_netif_get_nr_of_ifs(); ++i)
-  {
-    netif = esp_netif_next(netif);
-    ESP_ERROR_CHECK(esp_netif_get_ip_info(netif, &ip_info));
-    if (ip_info.ip.addr != 0 && ip_info.ip.addr != 0x010A0A0A) // 10.10.10.1
-    {
-      sprintf(ip, IPSTR, IP2STR(&ip_info.ip));
-      break;
-    }
-  }
-  LOGI("ip: %s", ip);
-  return string(ip);
+  esp_netif_t *netif = is_wifi_connected() ?
+      esp_netif_get_handle_from_ifkey("WIFI_STA_DEF") : apNetif;
+  esp_netif_ip_info_t info{};
+  if (!netif || esp_netif_get_ip_info(netif, &info) != ESP_OK) return "0.0.0.0";
+  char ip[16];
+  snprintf(ip, sizeof ip, IPSTR, IP2STR(&info.ip));
+  return ip;
 }
 
 string Wifi::GetSSID()
@@ -468,7 +525,8 @@ string Wifi::GetSSID()
   wifi_config_t wifi_config;
   if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK)
   {
-    return string((char *)wifi_config.sta.ssid);
+    return string((char *)wifi_config.sta.ssid,
+                  strnlen((char *)wifi_config.sta.ssid, sizeof wifi_config.sta.ssid));
   }
   return "";
 }
@@ -476,17 +534,18 @@ string Wifi::GetSSID()
 bool Wifi::SetStaCredentials(const std::string &ssid,
                              const std::string &password)
 {
-  if (!is_valid_wifi_ssid(ssid.c_str()))
+  std::lock_guard<std::mutex> lock(wifiConfigMutex);
+  if (ssid.empty() || ssid.size() > 32 || ssid.find('\0') != string::npos ||
+      password.find('\0') != string::npos ||
+      (!password.empty() && (password.size() < 8 || password.size() > 63)))
   {
     LOGW("SetStaCredentials failed: invalid ssid");
     return false;
   }
 
   wifi_config_t wifi_config = {};
-  strncpy(reinterpret_cast<char *>(wifi_config.sta.ssid), ssid.c_str(),
-          sizeof(wifi_config.sta.ssid) - 1);
-  strncpy(reinterpret_cast<char *>(wifi_config.sta.password), password.c_str(),
-          sizeof(wifi_config.sta.password) - 1);
+  memcpy(wifi_config.sta.ssid, ssid.data(), ssid.size());
+  memcpy(wifi_config.sta.password, password.data(), password.size());
   if (!password.empty())
   {
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;

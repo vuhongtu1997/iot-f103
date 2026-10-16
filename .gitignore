@@ -2,6 +2,9 @@ common/ota_key.h
 esp32/main/secrets.h
 esp32/build/
 stm32/build/
+esp32c3-node/build/
+esp32c3-node/sdkconfig
+esp32c3-node/sdkconfig.old
 tools/ota-key.bin
 __pycache__/
 *.pyc

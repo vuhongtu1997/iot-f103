@@ -21,6 +21,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
 	  "timer/*.cpp"
 	  "uart/*.cpp"
 	  "wifi/*.cpp"
+	  "udp/*.cpp"
 	  "*.cpp"
 	)
 else()
@@ -46,11 +47,11 @@ else()
 	  "timer/*.cpp"
 	  "uart/*.cpp"
 	  "wifi/*.cpp"
+	  "udp/*.cpp"
 	  "*.cpp"
 	)
 endif()
 
-list(FILTER srcs EXCLUDE REGEX "/(GatewayUdpMessage|Udp)\\.cpp$")
 
 set(incs
 	"hc"
@@ -74,7 +75,8 @@ set(incs
 	"sntp"
 	"timer"
 	"uart"
-	"wifi")
+	"wifi"
+	"udp")
 
 idf_component_register(
     SRCS "main.cpp" "${srcs}" "../../common/protocol.c"

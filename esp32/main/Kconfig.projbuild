@@ -1,5 +1,16 @@
 menu "Minihub Configuration"
 
+    config GATEWAY_UDP_PROVISIONING
+        bool
+        default y
+        select ESP_WIFI_SOFTAP_SUPPORT
+
+    config GATEWAY_SETUP_PASSWORD
+        string "Wi-Fi setup AP password (8-63 characters)"
+        default "configureme"
+        help
+            WPA2 requires 8-63 bytes. An invalid value uses configureme at runtime.
+
     config ENABLE_LITTLEFS
         bool "Enable use Little FS"
         default y

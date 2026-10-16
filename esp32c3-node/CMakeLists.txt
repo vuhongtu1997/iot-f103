@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+set(IDF_TARGET esp32c3 CACHE STRING "Node target")
+if(NOT IDF_TARGET STREQUAL "esp32c3")
+    message(FATAL_ERROR "This node firmware requires ESP32-C3")
+endif()
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(esp32c3_node)

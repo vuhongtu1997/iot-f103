@@ -70,7 +70,11 @@ void node_run(int boot_mode)
             }
             uint16_t raw = boot_mode ? 0xffff : sensor_raw(), regs[MODBUS_REGISTER_COUNT];
             regs[0] = raw;
+#ifdef NODE_CALIBRATED_ADC
+            regs[1] = sensor_millivolts(raw);
+#else
             regs[1] = raw == 0xffff ? 0xffff : (uint16_t)((uint32_t)raw * 3300 / 4095);
+#endif
             regs[2] = (uint16_t)(FW_VERSION >> 16);
             regs[3] = (uint16_t)FW_VERSION;
             regs[4] = (uint16_t)boot_mode;

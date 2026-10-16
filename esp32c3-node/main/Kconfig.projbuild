@@ -1,0 +1,22 @@
+menu "RS485 sensor node"
+config NODE_SENSOR_TYPE
+    int "Sensor family: 0 unknown, 1 gas, 2 temperature/humidity, 3 CH3"
+    range 0 3
+    default 0
+config NODE_UART_TX
+    int "RS485 TX GPIO"
+    range 0 21
+    default 4
+config NODE_UART_RX
+    int "RS485 RX GPIO"
+    range 0 21
+    default 5
+config NODE_UART_DE
+    int "RS485 DE + /RE GPIO"
+    range 0 21
+    default 6
+config NODE_RESET_GPIO
+    int "Active-low factory reset button GPIO"
+    range 0 21
+    default 3
+endmenu

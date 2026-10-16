@@ -1,6 +1,10 @@
 # ESP32-C3 MQTT gateway with RS485 Modbus RTU
 
-This ESP-IDF application keeps the existing gateway/cloud MQTT protocol and adds a Modbus RTU master for STM32 nodes over RS485. The ESP32 target is **ESP32-C3**. BLE device communication, UDP discovery/provisioning, Ethernet, and an external RTC are not included in this build. Wi-Fi is the only network transport, and SNTP over Wi-Fi is the only time source. Wi-Fi credentials must already be available in NVS.
+An alternative **ESP32-C3 sensor node replacing STM32F103** is available in
+[`esp32c3-node`](./esp32c3-node/README.md). It uses the same RS485 commissioning
+and sensor registers with the existing gateway. The original STM32 project is retained.
+
+This ESP-IDF application keeps the existing gateway/cloud MQTT protocol and adds a Modbus RTU master for sensor nodes over RS485. The ESP32 target is **ESP32-C3**. BLE device communication, Ethernet, and an external RTC are not included in this build. Wi-Fi is the network transport, with UDP discovery and Wi-Fi configuration on port **8181**. SNTP over Wi-Fi is the time source. See [UDP Wi-Fi setup](./docs/UDP_WIFI.md).
 
 ## Features
 
@@ -95,7 +99,7 @@ The generated sensor type is returned in FC03 register 12. The ESP32 remains com
 
 ## Wi-Fi and MQTT configuration
 
-The firmware starts in station mode and reads Wi-Fi/MQTT settings from the existing NVS-backed `Config` service. BLE and UDP provisioning have been removed from this target; configure credentials through an external provisioning process before boot. The factory-reset button sequence clears saved network configuration, so credentials must be provisioned again afterward.
+The firmware starts with saved station credentials. When no credentials exist, or the station remains offline for about 30 seconds, it opens the WPA2 setup AP `RD_MH_<last 6 MAC digits>` at `192.168.4.1`. Its default password is `configureme`, configurable under `Minihub Configuration` in menuconfig. Connect to that AP and use UDP port 8181 to scan networks and save credentials. The AP closes after about 30 seconds of station connectivity. The factory-reset button clears network configuration and returns to setup on restart. Full commands and examples are in [docs/UDP_WIFI.md](./docs/UDP_WIFI.md).
 
 Relevant existing NVS settings include `wifi_ssid`, `wifi_pass`, `host`, `port`, `client_id`, `username`, `password`, and `keep_alive`. The MQTT request/response topics are derived from the gateway MAC and follow the existing `/v3/server/hc/{mac}/jsonreq` and `/v3/hc/{mac}/server/jsonres` contract. Complete JSON request, response, error, and telemetry examples are documented in [docs/MQTT.md](./docs/MQTT.md).
 

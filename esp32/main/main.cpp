@@ -11,6 +11,7 @@
 #include <driver/uart.h>
 
 #include "Wifi.h"
+#include "UdpProvisioning.h"
 #include "Sntp.h"
 #include "ButtonSignal.h"
 // #include "TimerSchedule.h"
@@ -66,6 +67,7 @@ extern "C" void app_main(void)
   ButtonSignal *buttonSignal = ButtonSignal::getInstance();
 
   Wifi::Init();
+  UdpProvisioning::Init();
   Sntp::init(Wifi::WaitConnecting());
   buttonSignal->Init();
 

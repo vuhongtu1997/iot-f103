@@ -20,7 +20,7 @@ The gateway scans once after startup, then polls registered nodes every five sec
 
 `scan` and `discover` only read assigned IDs; neither grants new addresses. No prefix discovery or special address-247 multicast is implemented. To return a configured node to its initial unconfigured state, hold its PB12-to-GND factory-reset button for at least 5 seconds. The node invalidates and erases both address configuration pages, then restarts with address 0. Firmware and compile-time sensor type are retained. No remote reset command is implemented.
 
-On ESP32-C3 the gateway uses UART1 at 38400 8N1 with TX=GPIO4, RX=GPIO5, and DE/RE=GPIO6. These GPIOs are shared with external JTAG on common C3 modules. This app build disables the old BLE device protocol, UDP discovery/provisioning service, Ethernet, and external DS1307 RTC. Wi-Fi is the only network transport and SNTP is the only time source. Wi-Fi credentials therefore need to be provisioned before boot using a mechanism outside this firmware.
+On ESP32-C3 the gateway uses UART1 at 38400 8N1 with TX=GPIO4, RX=GPIO5, and DE/RE=GPIO6. These GPIOs are shared with external JTAG on common C3 modules. This app build disables the old BLE device protocol, Ethernet, and external DS1307 RTC. Wi-Fi is the network transport and SNTP is the time source. UDP discovery and Wi-Fi provisioning use port 8181 and a fallback setup AP; see [UDP_WIFI.md](./UDP_WIFI.md) for requests and setup instructions.
 
 ## FC03 registers (zero-based offsets)
 

@@ -31,7 +31,7 @@
 /** @brief Khóa cho địa chỉ máy chủ MQTT */
 #define HOST_KEY "host"
 /** @brief Giá trị mặc định cho host */
-#define HOST_DEFAULT "161.248.199.187"
+#define HOST_DEFAULT "broker.hivemq.com"
 
 /** @brief Khóa cho cổng MQTT */
 #define PORT_KEY "port"
